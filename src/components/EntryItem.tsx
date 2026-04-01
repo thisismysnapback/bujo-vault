@@ -21,15 +21,15 @@ const SYMBOLS: Record<EntryType, string> = {
   priority: '★',
 };
 
-const COLORS: Record<EntryType, string> = {
-  task: 'text-zinc-300',
-  done: 'text-zinc-500 line-through',
-  migrated: 'text-indigo-400',
-  killed: 'text-red-400/50 line-through',
-  note: 'text-zinc-400',
-  event: 'text-emerald-400',
-  scheduled: 'text-amber-400',
-  priority: 'text-yellow-400 font-bold',
+const STYLE: Record<EntryType, React.CSSProperties> = {
+  task: { color: 'var(--text)' },
+  done: { color: 'var(--text-muted)', textDecoration: 'line-through' },
+  migrated: { color: 'var(--gold-dim)' },
+  killed: { color: 'var(--text-faint)', textDecoration: 'line-through' },
+  note: { color: 'var(--text-muted)' },
+  event: { color: '#7dbfa5' },
+  scheduled: { color: 'var(--gold)' },
+  priority: { color: 'var(--gold-bright)', fontWeight: '600' },
 };
 
 export function EntryItem({ entry, date, isFocused }: EntryItemProps) {
@@ -76,23 +76,35 @@ export function EntryItem({ entry, date, isFocused }: EntryItemProps) {
         e.dataTransfer.setData('application/json', JSON.stringify({ id: entry.id, date }));
         e.dataTransfer.effectAllowed = 'move';
       }}
-      className={cn(
-        "group flex items-start gap-3 py-1.5 px-2 rounded-md transition-colors cursor-grab active:cursor-grabbing",
-        isFocused ? "bg-zinc-800/50" : "hover:bg-zinc-800/30"
-      )}
       onDoubleClick={() => setIsEditing(true)}
+      className="group"
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: '10px',
+        padding: '4px 6px',
+        borderRadius: '3px',
+        cursor: 'grab',
+        background: isFocused ? 'var(--bg-hover)' : 'transparent',
+        transition: 'background 0.1s',
+      }}
     >
-      <div 
-        className={cn(
-          "w-5 text-center font-mono select-none cursor-pointer",
-          COLORS[entry.type]
-        )}
+      <span
         onClick={toggleStatus}
+        style={{
+          width: '16px',
+          textAlign: 'center',
+          fontSize: '13px',
+          flexShrink: 0,
+          cursor: 'pointer',
+          userSelect: 'none',
+          ...STYLE[entry.type],
+        }}
       >
         {SYMBOLS[entry.type]}
-      </div>
-      
-      <div className="flex-1">
+      </span>
+
+      <div style={{ flex: 1 }}>
         {isEditing ? (
           <input
             ref={inputRef}
@@ -101,19 +113,27 @@ export function EntryItem({ entry, date, isFocused }: EntryItemProps) {
             onChange={(e) => setEditValue(e.target.value)}
             onKeyDown={handleKeyDown}
             onBlur={handleBlur}
-            className="w-full bg-transparent border-none outline-none text-zinc-100 font-sans"
+            style={{
+              width: '100%',
+              background: 'transparent',
+              border: 'none',
+              outline: 'none',
+              color: 'var(--text)',
+              fontSize: '13px',
+              fontFamily: 'inherit',
+            }}
           />
         ) : (
-          <span className={cn("font-sans text-[15px]", COLORS[entry.type])}>
+          <span style={{ fontSize: '13px', ...STYLE[entry.type] }}>
             {entry.content}
           </span>
         )}
       </div>
-      
-      <div className="opacity-0 group-hover:opacity-100 flex items-center gap-2 text-xs text-zinc-500 transition-opacity">
-        <button onClick={() => updateEntry(date, entry.id, { type: 'migrated' })} className="hover:text-indigo-400" title="Migrate">&gt;</button>
-        <button onClick={() => updateEntry(date, entry.id, { type: 'killed' })} className="hover:text-red-400" title="Kill">~</button>
-        <button onClick={() => deleteEntry(date, entry.id)} className="hover:text-red-500" title="Delete">×</button>
+
+      <div className="opacity-0 group-hover:opacity-100" style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--text-faint)', transition: 'opacity 0.1s' }}>
+        <button onClick={() => updateEntry(date, entry.id, { type: 'migrated' })} title="Migrate" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontFamily: 'inherit' }}>&gt;</button>
+        <button onClick={() => updateEntry(date, entry.id, { type: 'killed' })} title="Kill" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontFamily: 'inherit' }}>~</button>
+        <button onClick={() => deleteEntry(date, entry.id)} title="Delete" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontFamily: 'inherit' }}>×</button>
       </div>
     </div>
   );

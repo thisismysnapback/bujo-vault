@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { VaultProvider, useVault } from './store/VaultContext';
-import { Sidebar } from './components/Sidebar';
+import { TopNav } from './components/TopNav';
 import { DailyView } from './components/DailyView';
 import { SearchView } from './components/SearchView';
 import { ReviewView } from './components/ReviewView';
@@ -15,7 +15,6 @@ import { CalendarView } from './components/CalendarView';
 function MainContent() {
   const { currentView } = useVault();
   const [showHelp, setShowHelp] = useState(false);
-  const [showCoach, setShowCoach] = useState(false);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -25,29 +24,16 @@ function MainContent() {
         e.preventDefault();
         setShowHelp(prev => !prev);
       }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
-        e.preventDefault();
-        setShowCoach(prev => !prev);
-      }
-      if (e.key === 'Escape') {
-        setShowHelp(false);
-        setShowCoach(false);
-      }
+      if (e.key === 'Escape') setShowHelp(false);
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  if (showHelp) {
-    return <HelpOverlay onClose={() => setShowHelp(false)} />;
-  }
-
-  if (showCoach) {
-    return <CoachView onClose={() => setShowCoach(false)} />;
-  }
+  if (showHelp) return <HelpOverlay onClose={() => setShowHelp(false)} />;
 
   return (
-    <div className="flex-1 h-full overflow-hidden bg-zinc-950">
+    <div className="flex-1 min-h-0 overflow-hidden" style={{ background: 'var(--bg)' }}>
       {currentView === 'daily' && <DailyView />}
       {currentView === 'calendar' && <CalendarView />}
       {currentView === 'monthly' && <MonthlyView />}
@@ -64,8 +50,8 @@ function MainContent() {
 export default function App() {
   return (
     <VaultProvider>
-      <div className="flex h-screen w-full bg-zinc-950 text-zinc-100 font-sans antialiased overflow-hidden selection:bg-indigo-500/30">
-        <Sidebar />
+      <div className="flex flex-col h-screen w-full overflow-hidden" style={{ background: 'var(--bg)', color: 'var(--text)', fontFamily: "'JetBrains Mono', monospace" }}>
+        <TopNav />
         <MainContent />
       </div>
     </VaultProvider>

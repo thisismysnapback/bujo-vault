@@ -138,34 +138,56 @@ export function DailyView() {
   const isToday = date === getTodayDateString();
 
   return (
-    <div className="flex flex-col h-full bg-zinc-950 text-zinc-100 overflow-hidden">
-      <div className="flex items-center justify-between px-8 py-6">
-        <div className="flex items-center gap-2">
-          <button onClick={handlePrevDay} className="p-1.5 rounded-lg hover:bg-zinc-900 text-zinc-500 hover:text-zinc-200 transition-colors">
-            <ChevronLeft size={18} />
-          </button>
-          <button onClick={handleToday} className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-zinc-900 text-zinc-500 hover:text-zinc-200 transition-colors text-sm font-medium">
-            <CalendarIcon size={14} />
-            Today
-          </button>
-          <button onClick={handleNextDay} className="p-1.5 rounded-lg hover:bg-zinc-900 text-zinc-500 hover:text-zinc-200 transition-colors">
-            <ChevronRight size={18} />
-          </button>
-        </div>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      {/* Date nav bar */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', borderBottom: '1px solid var(--border)' }}>
+        <button onClick={handlePrevDay} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '2px 4px' }}>
+          <ChevronLeft size={14} />
+        </button>
+        <button
+          onClick={handleToday}
+          style={{
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            color: isToday ? 'var(--gold)' : 'var(--text-muted)',
+            fontSize: '12px',
+            fontFamily: 'inherit',
+            padding: '2px 6px',
+          }}
+        >
+          today
+        </button>
+        <button onClick={handleNextDay} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '2px 4px' }}>
+          <ChevronRight size={14} />
+        </button>
+        <span style={{ fontSize: '12px', color: 'var(--text-muted)', marginLeft: '8px' }}>
+          {format(new Date(date + 'T12:00:00'), 'EEE, MMM d yyyy').toLowerCase()}
+        </span>
       </div>
 
-      <div className="flex-1 overflow-y-auto scrollbar-hide px-8 py-4 max-w-3xl mx-auto w-full">
-        <div className="mb-12">
-          <h1 className="text-4xl font-serif font-light tracking-tight text-zinc-100 mb-2">
-            {format(new Date(date + 'T12:00:00'), 'EEEE, MMMM do')}
-          </h1>
-          {isToday && <p className="text-zinc-500 font-sans">{greeting}</p>}
+      <div className="scrollbar-hide" style={{ flex: 1, overflowY: 'auto', padding: '24px', maxWidth: '640px', margin: '0 auto', width: '100%' }}>
+        {/* Terminal prompt */}
+        <div style={{ fontSize: '13px', marginBottom: '24px' }}>
+          <span style={{ color: 'var(--gold)' }}>ryan</span>
+          <span style={{ color: 'var(--text-muted)' }}>@</span>
+          <span style={{ color: 'var(--gold)' }}>bujo.vault</span>
+          <span style={{ color: 'var(--text-muted)' }}> $ </span>
+          <span style={{ color: 'var(--text)' }}>log {format(new Date(date + 'T12:00:00'), 'yyyy-MM-dd')}</span>
         </div>
 
-        <div className="space-y-1 mb-8">
+        {/* Date heading */}
+        <div style={{ marginBottom: '24px' }}>
+          <h1 style={{ fontSize: '22px', fontWeight: '600', color: 'var(--text)', margin: 0, fontFamily: 'inherit' }}>
+            {format(new Date(date + 'T12:00:00'), 'EEEE, MMMM do').toLowerCase()}
+          </h1>
+          {isToday && <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '4px 0 0' }}>// {greeting}</p>}
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginBottom: '32px' }}>
           {sortedEntries.length === 0 ? (
-            <div className="text-zinc-600 italic py-4 text-sm">
-              No entries yet. Start typing to capture.
+            <div style={{ fontSize: '12px', color: 'var(--text-faint)', fontStyle: 'italic', padding: '8px 0' }}>
+              // no entries yet. start typing to capture.
             </div>
           ) : (
             sortedEntries.map((entry, idx) => (
@@ -180,7 +202,7 @@ export function DailyView() {
         </div>
       </div>
 
-      <div className="px-8 pb-8 pt-4 max-w-3xl mx-auto w-full">
+      <div style={{ padding: '16px 24px 24px', maxWidth: '640px', margin: '0 auto', width: '100%' }}>
         <InputBar date={date} />
       </div>
     </div>

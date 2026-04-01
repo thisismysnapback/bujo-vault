@@ -146,12 +146,12 @@ export function InputBar({ date }: InputBarProps) {
     }
   };
 
+  const isDumpMode = value.toLowerCase().startsWith('dump ') || (value.length > 60 && !Object.keys(PREFIX_MAP).some(p => value.toLowerCase().startsWith(p)));
+
   return (
-    <div className="relative group w-full">
-      <div className="relative flex items-center w-full transition-all bg-zinc-900/30 rounded-2xl px-4">
-        <div className="pr-3 text-zinc-600 flex items-center justify-center">
-          {isProcessing ? <Loader2 size={18} className="animate-spin text-zinc-400" /> : <Command size={18} className="text-zinc-700" />}
-        </div>
+    <div style={{ position: 'relative', width: '100%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: '12px', gap: '8px' }}>
+        <span style={{ fontSize: '12px', color: 'var(--gold)', flexShrink: 0 }}>›</span>
         <input
           ref={inputRef}
           type="text"
@@ -159,26 +159,31 @@ export function InputBar({ date }: InputBarProps) {
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
           disabled={isProcessing}
-          placeholder="Type entry (t task, n note) or paste a long brain dump for AI parsing..."
-          className="flex-1 bg-transparent border-none outline-none text-zinc-100 py-4 font-sans placeholder:text-zinc-600 disabled:opacity-50 text-base"
+          placeholder="type entry or dump a brain dump..."
+          style={{
+            flex: 1,
+            background: 'transparent',
+            border: 'none',
+            outline: 'none',
+            color: 'var(--text)',
+            fontSize: '13px',
+            fontFamily: 'inherit',
+            opacity: isProcessing ? 0.5 : 1,
+          }}
         />
-        <div className="pl-3 flex items-center gap-3 opacity-0 group-focus-within:opacity-100 transition-opacity duration-300">
-          <button
-            onClick={handleRetry}
-            disabled={isProcessing}
-            className="p-1 rounded hover:bg-zinc-800 text-zinc-600 hover:text-zinc-300 transition-colors"
-            title="Retry unprocessed dumps"
-          >
-            <RotateCcw size={14} />
-          </button>
-          <div className="hidden sm:flex items-center gap-1 text-xs font-medium text-zinc-600">
-            <Command size={10} /> K
-          </div>
-          <Sparkles size={16} className={`transition-colors ${value.toLowerCase().startsWith('dump ') || (value.length > 60 && !Object.keys(PREFIX_MAP).some(p => value.toLowerCase().startsWith(p))) ? 'text-zinc-300' : 'text-zinc-700'}`} />
-        </div>
+        {isProcessing && <Loader2 size={12} style={{ color: 'var(--text-muted)', animation: 'spin 1s linear infinite', flexShrink: 0 }} />}
+        {isDumpMode && !isProcessing && <Sparkles size={12} style={{ color: 'var(--gold)', flexShrink: 0 }} />}
+        <button
+          onClick={handleRetry}
+          disabled={isProcessing}
+          title="Retry unprocessed dumps"
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', flexShrink: 0, padding: 0 }}
+        >
+          <RotateCcw size={11} />
+        </button>
       </div>
-      {error && <p className="text-xs text-red-400 mt-2 px-4">{error}</p>}
-      {retryCount !== null && <p className="text-xs text-emerald-400 mt-2 px-4">Re-parsed {retryCount} entries from dump blocks.</p>}
+      {error && <div style={{ fontSize: '11px', color: 'var(--red)', marginTop: '6px' }}>{error}</div>}
+      {retryCount !== null && <div style={{ fontSize: '11px', color: '#4caf50', marginTop: '6px' }}>re-parsed {retryCount} entries.</div>}
     </div>
   );
 }

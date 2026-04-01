@@ -48,6 +48,7 @@ const bujoApi = {
   analyticsStreak: () => ipcRenderer.invoke('analytics_streak'),
   analyticsWeekly: () => ipcRenderer.invoke('analytics_weekly'),
   analyticsCoach: () => ipcRenderer.invoke('analytics_coach'),
+  analyticsStats: (days: number) => ipcRenderer.invoke('analytics_stats', days),
 
   // Dump retry
   dumpRetry: () => ipcRenderer.invoke('dump_retry'),

@@ -1228,6 +1228,99 @@ function setupIpcHandlers() {
     }
   })
 
+  // Comprehensive stats for the stats view
+  ipcMain.handle('analytics_stats', async (_, days: number) => {
+    // Heatmap: past 365 days → date → entry count
+    const heatmap: Record<string, number> = {}
+    for (let i = 0; i < 365; i++) {
+      const date = localDateStr(-i)
+      const log = dayLogFromFile(vaultPath, date)
+      if (log.entries.length > 0) {
+        heatmap[date] = log.entries.length
+      }
+    }
+
+    // Period stats
+    const periodLogs = loadRange(days)
+    let pDone = 0, pTotal = 0, pGreenDays = 0, pDaysTracked = 0
+    let wdDone = 0, wdTotal = 0, weDone = 0, weTotal = 0
+    const byDow = [0, 0, 0, 0, 0, 0, 0]
+    const byDowTotal = [0, 0, 0, 0, 0, 0, 0]
+
+    for (const log of periodLogs) {
+      const d = countByType(log.entries, 'done')
+      const t = d + countByType(log.entries, 'task') + countByType(log.entries, 'priority')
+      pDone += d; pTotal += t
+      if (log.entries.length > 0) pDaysTracked++
+      if (t > 0 && d >= t) pGreenDays++
+      const dow = new Date(log.date + 'T12:00:00').getDay()
+      byDow[dow] += d
+      byDowTotal[dow] += t
+      if (dow === 0 || dow === 6) { weDone += d; weTotal += t }
+      else { wdDone += d; wdTotal += t }
+    }
+
+    const dowRates = byDow.map((d, i) => byDowTotal[i] > 0 ? Math.round((d / byDowTotal[i]) * 100) : 0)
+
+    // Previous same-length period for trend
+    const prevPeriodLogs = []
+    for (let i = days; i < days * 2; i++) {
+      prevPeriodLogs.push(dayLogFromFile(vaultPath, localDateStr(-i)))
+    }
+    let prevDone = 0, prevTotal = 0
+    for (const log of prevPeriodLogs) {
+      const d = countByType(log.entries, 'done')
+      prevDone += d
+      prevTotal += d + countByType(log.entries, 'task') + countByType(log.entries, 'priority')
+    }
+    const prevRate = prevTotal > 0 ? Math.round((prevDone / prevTotal) * 100) : 0
+
+    // All time
+    const allLogs = loadAll()
+    let aDone = 0, aTotal = 0, aDays = 0, aPerfect = 0
+    for (const log of allLogs) {
+      const d = countByType(log.entries, 'done')
+      const t = d + countByType(log.entries, 'task') + countByType(log.entries, 'priority')
+      aDone += d; aTotal += t
+      if (log.entries.length > 0) aDays++
+      if (t > 0 && d >= t) aPerfect++
+    }
+
+    // Best streak
+    const trackedDates = allLogs.filter(l => l.entries.length > 0).map(l => l.date).sort()
+    let bestStreak = 0, curS = 0
+    for (let i = 0; i < trackedDates.length; i++) {
+      if (i === 0) { curS = 1 }
+      else {
+        const prev = new Date(trackedDates[i - 1] + 'T12:00:00')
+        const curr = new Date(trackedDates[i] + 'T12:00:00')
+        const diff = Math.round((curr.getTime() - prev.getTime()) / 86400000)
+        curS = diff === 1 ? curS + 1 : 1
+      }
+      bestStreak = Math.max(bestStreak, curS)
+    }
+
+    return {
+      heatmap,
+      period: {
+        rate: pTotal > 0 ? Math.round((pDone / pTotal) * 100) : 0,
+        prevRate,
+        greenDays: pGreenDays,
+        daysTracked: pDaysTracked,
+        weekdayAvg: wdTotal > 0 ? Math.round((wdDone / wdTotal) * 100) : 0,
+        weekendAvg: weTotal > 0 ? Math.round((weDone / weTotal) * 100) : 0,
+      },
+      dowRates,
+      allTime: {
+        rate: aTotal > 0 ? Math.round((aDone / aTotal) * 100) : 0,
+        daysTracked: aDays,
+        perfectDays: aPerfect,
+      },
+      bestStreak,
+      currentStreak: calculateStreak(),
+    }
+  })
+
   // Full coach report (mirrors bujo-ai's full_report)
   ipcMain.handle('analytics_coach', async () => {
     const logs7 = loadRange(7)

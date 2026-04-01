@@ -51,6 +51,17 @@ export interface BuJoApi {
     totalEntries: number; done: number; killed: number; migrated: number;
     tasks: number; streak: number; completionRate: number
   }>
+  analyticsStats(days: number): Promise<{
+    heatmap: Record<string, number>;
+    period: {
+      rate: number; prevRate: number; greenDays: number;
+      daysTracked: number; weekdayAvg: number; weekendAvg: number;
+    };
+    dowRates: number[];
+    allTime: { rate: number; daysTracked: number; perfectDays: number };
+    bestStreak: number;
+    currentStreak: number;
+  }>
   analyticsCoach(): Promise<{
     period: string; streak: number; momentum: string; completionRate: number;
     priorityAlignment: number; totalEntries: number;

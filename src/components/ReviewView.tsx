@@ -1,122 +1,362 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useVault } from '../store/VaultContext';
-import { BarChart, CheckCircle, ArrowRight, XCircle, Star, Calendar, Brain, Sparkles, Loader2, ChevronLeft, ChevronRight, FileText } from 'lucide-react';
-import { DailyLog } from '../types';
-import { format, subMonths, addMonths } from 'date-fns';
+import { Sparkles, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { format, subMonths, addMonths, subDays, startOfWeek, addDays } from 'date-fns';
 
-const PERSPECTIVES = [
-  { id: 'chronicle', label: 'Chronicle', icon: <FileText size={16} />, desc: 'What happened' },
-  { id: 'coach', label: 'Coach', icon: <Brain size={16} />, desc: 'Goals & momentum' },
-  { id: 'relationships', label: 'Relationships', icon: <FileText size={16} />, desc: 'Connection & isolation' },
-  { id: 'strengths', label: 'Strengths', icon: <Star size={16} />, desc: 'Evidence-based positives' },
-  { id: 'therapist', label: 'Therapist', icon: <FileText size={16} />, desc: 'Emotional patterns' },
-  { id: 'values-meaning', label: 'Values & Meaning', icon: <FileText size={16} />, desc: 'Alignment & purpose' },
-  { id: 'synthesis', label: 'Synthesis', icon: <Sparkles size={16} />, desc: 'Combined report' },
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+interface StatsData {
+  heatmap: Record<string, number>;
+  period: {
+    rate: number;
+    prevRate: number;
+    greenDays: number;
+    daysTracked: number;
+    weekdayAvg: number;
+    weekendAvg: number;
+  };
+  dowRates: number[]; // [sun, mon, tue, wed, thu, fri, sat]
+  allTime: { rate: number; daysTracked: number; perfectDays: number };
+  bestStreak: number;
+  currentStreak: number;
+}
+
+// ─── Period config ────────────────────────────────────────────────────────────
+
+const PERIODS: { label: string; days: number }[] = [
+  { label: '14d', days: 14 },
+  { label: '30d', days: 30 },
+  { label: '60d', days: 60 },
+  { label: '90d', days: 90 },
+  { label: '180d', days: 180 },
+  { label: '365d', days: 365 },
 ];
 
-export function ReviewView() {
-  const { logs, streak } = useVault();
-  const [weekly, setWeekly] = useState<{
-    totalEntries: number; done: number; killed: number; migrated: number;
-    tasks: number; streak: number; completionRate: number
-  } | null>(null);
-  const [tab, setTab] = useState<'analytics' | 'review'>('analytics');
+// ─── Heatmap ──────────────────────────────────────────────────────────────────
 
-  useEffect(() => {
-    if (window.bujo) {
-      window.bujo.analyticsWeekly().then(setWeekly).catch(console.error);
+function HeatmapGrid({ heatmap }: { heatmap: Record<string, number> }) {
+  const today = new Date();
+  // Build 52 weeks of data (364 days back from today, aligned to weeks)
+  const startDate = startOfWeek(subDays(today, 363), { weekStartsOn: 1 }); // start on Monday
+
+  const weeks: { date: Date; count: number }[][] = [];
+  let current = startDate;
+
+  while (current <= today) {
+    const week: { date: Date; count: number }[] = [];
+    for (let d = 0; d < 7; d++) {
+      const dateStr = format(addDays(current, d), 'yyyy-MM-dd');
+      const dayDate = addDays(current, d);
+      week.push({ date: dayDate, count: heatmap[dateStr] || 0 });
     }
-  }, []);
+    weeks.push(week);
+    current = addDays(current, 7);
+  }
 
-  const stats = useMemo(() => {
-    let totalTasks = 0;
-    let completedTasks = 0;
-    let migratedTasks = 0;
-    let killedTasks = 0;
-    let totalPriorities = 0;
-    let totalDays = Object.keys(logs).length;
+  // Month labels: find first week where month changes
+  const monthLabels: { col: number; label: string }[] = [];
+  let lastMonth = -1;
+  weeks.forEach((week, i) => {
+    const month = week[0].date.getMonth();
+    if (month !== lastMonth) {
+      monthLabels.push({ col: i, label: format(week[0].date, 'MMM').toLowerCase() });
+      lastMonth = month;
+    }
+  });
 
-    (Object.values(logs) as DailyLog[]).forEach((log) => {
-      log.entries.forEach((entry) => {
-        if (entry.type === 'task' || entry.type === 'done') totalTasks++;
-        if (entry.type === 'done') completedTasks++;
-        if (entry.type === 'migrated') migratedTasks++;
-        if (entry.type === 'killed') killedTasks++;
-        if (entry.type === 'priority') totalPriorities++;
-      });
-    });
+  const maxCount = Math.max(1, ...Object.values(heatmap));
 
-    const completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
-    const avgTasksPerDay = totalDays > 0 ? (totalTasks / totalDays).toFixed(1) : '0';
+  function cellColor(count: number): string {
+    if (count === 0) return '#222222';
+    const intensity = count / maxCount;
+    if (intensity < 0.25) return '#5c4a10';
+    if (intensity < 0.5) return '#8a6f1a';
+    if (intensity < 0.75) return '#c9a227';
+    return '#e8bf45';
+  }
 
-    return { totalTasks, completedTasks, migratedTasks, killedTasks, completionRate, avgTasksPerDay, totalPriorities, totalDays };
-  }, [logs]);
+  const DOW_LABELS = ['m', '', 'w', '', 'f', '', 's'];
 
   return (
-    <div className="flex flex-col h-full bg-zinc-950 text-zinc-100 overflow-hidden">
-      <div className="px-8 pt-12 pb-4 max-w-3xl mx-auto w-full">
-        <h1 className="text-4xl font-serif font-light tracking-tight text-zinc-100 mb-4">Review</h1>
-        <div className="flex gap-2">
-          <button onClick={() => setTab('analytics')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${tab === 'analytics' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}>Analytics</button>
-          <button onClick={() => setTab('review')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${tab === 'review' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}>Monthly Review</button>
+    <div>
+      {/* Month labels */}
+      <div style={{ display: 'flex', gap: '2px', marginLeft: '20px', marginBottom: '4px' }}>
+        {weeks.map((_, i) => {
+          const label = monthLabels.find(m => m.col === i);
+          return (
+            <div key={i} style={{ width: '10px', fontSize: '10px', color: 'var(--text-muted)', flexShrink: 0 }}>
+              {label ? label.label : ''}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Grid rows: day of week */}
+      <div style={{ display: 'flex', gap: '4px' }}>
+        {/* DOW labels */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', width: '14px' }}>
+          {DOW_LABELS.map((l, i) => (
+            <div key={i} style={{ height: '10px', fontSize: '9px', color: 'var(--text-muted)', lineHeight: '10px', textAlign: 'right' }}>
+              {l}
+            </div>
+          ))}
+        </div>
+
+        {/* Week columns */}
+        <div style={{ display: 'flex', gap: '2px' }}>
+          {weeks.map((week, wi) => (
+            <div key={wi} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              {week.map((day, di) => (
+                <div
+                  key={di}
+                  title={`${format(day.date, 'MMM d')}: ${day.count} entries`}
+                  style={{
+                    width: '10px',
+                    height: '10px',
+                    borderRadius: '2px',
+                    background: day.date > today ? 'transparent' : cellColor(day.count),
+                    flexShrink: 0,
+                  }}
+                />
+              ))}
+            </div>
+          ))}
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto scrollbar-hide px-8 py-4 max-w-3xl mx-auto w-full">
-        {tab === 'analytics' ? (
-          <AnalyticsTab stats={stats} weekly={weekly} />
-        ) : (
-          <MonthlyReviewTab />
-        )}
+      {/* Legend */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '6px', marginLeft: '18px' }}>
+        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>// less</span>
+        {['#222222', '#5c4a10', '#8a6f1a', '#c9a227', '#e8bf45'].map((c, i) => (
+          <div key={i} style={{ width: '10px', height: '10px', borderRadius: '2px', background: c }} />
+        ))}
+        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>more</span>
       </div>
     </div>
   );
 }
 
-function AnalyticsTab({ stats, weekly }: { stats: any; weekly: any }) {
+// ─── Day of week bar chart ────────────────────────────────────────────────────
+
+function DowChart({ rates }: { rates: number[] }) {
+  // rates is [sun, mon, tue, wed, thu, fri, sat]
+  const labels = ['su', 'mo', 'tu', 'we', 'th', 'fr', 'sa'];
+  const max = Math.max(1, ...rates);
+
   return (
-    <>
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8">
-        <StatCard icon={<CheckCircle size={18} className="text-emerald-400" />} title="Completion Rate" value={`${stats.completionRate}%`} />
-        <StatCard icon={<Calendar size={18} className="text-zinc-400" />} title="Avg Tasks / Day" value={stats.avgTasksPerDay} />
-        <StatCard icon={<Star size={18} className="text-yellow-400" />} title="Priorities Logged" value={stats.totalPriorities.toString()} />
-        <StatCard icon={<BarChart size={18} className="text-indigo-400" />} title="Total Tasks" value={stats.totalTasks.toString()} />
-        <StatCard icon={<ArrowRight size={18} className="text-indigo-400" />} title="Migrated" value={stats.migratedTasks.toString()} />
-        <StatCard icon={<XCircle size={18} className="text-red-400" />} title="Killed" value={stats.killedTasks.toString()} />
-      </div>
-
-      {weekly && (
-        <div className="p-6 bg-zinc-900/30 rounded-2xl mb-6">
-          <h2 className="text-lg font-medium text-zinc-100 mb-4 flex items-center gap-2"><Calendar size={18} className="text-emerald-400" />This Week</h2>
-          <div className="grid grid-cols-4 gap-4 mb-4">
-            <div><div className="text-2xl font-light text-zinc-100">{weekly.totalEntries}</div><div className="text-xs text-zinc-500">entries</div></div>
-            <div><div className="text-2xl font-light text-emerald-400">{weekly.done}</div><div className="text-xs text-zinc-500">done</div></div>
-            <div><div className="text-2xl font-light text-indigo-400">{weekly.migrated}</div><div className="text-xs text-zinc-500">migrated</div></div>
-            <div><div className="text-2xl font-light text-red-400">{weekly.killed}</div><div className="text-xs text-zinc-500">killed</div></div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      {labels.map((label, i) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '12px', color: 'var(--text-muted)', width: '20px', flexShrink: 0 }}>{label}</span>
+          <div style={{ flex: 1, height: '12px', background: '#222', borderRadius: '2px', overflow: 'hidden', position: 'relative' }}>
+            <div style={{
+              width: `${rates[i]}%`,
+              height: '100%',
+              background: 'var(--gold)',
+              borderRadius: '2px',
+              opacity: rates[i] === 0 ? 0.2 : 1,
+            }} />
           </div>
-          <p className="text-zinc-400 text-sm">
-            {weekly.completionRate}% completion rate this week.
-            {weekly.streak >= 3 && ` ${weekly.streak} day streak.`}
-            {weekly.totalEntries === 0 ? "Start capturing to build momentum." :
-             weekly.completionRate > 70 ? "Strong momentum. Keep it up." :
-             weekly.completionRate > 40 ? "Steady progress. Consider killing tasks you keep migrating." :
-             "Focus on 1-3 priorities per day."}
-          </p>
+          <span style={{ fontSize: '12px', color: rates[i] > 0 ? 'var(--gold)' : 'var(--text-faint)', width: '36px', textAlign: 'right', flexShrink: 0 }}>
+            {rates[i] > 0 ? `${rates[i]}%` : '—'}
+          </span>
         </div>
-      )}
-
-      <div className="p-6 bg-zinc-900/30 rounded-2xl">
-        <h2 className="text-lg font-medium text-zinc-100 mb-4 flex items-center gap-2"><BarChart size={18} className="text-indigo-400" />Momentum Insights</h2>
-        <p className="text-zinc-400 text-sm leading-relaxed">
-          {stats.totalDays === 0 ? "You haven't logged any days yet. Start capturing to see insights." :
-           stats.completionRate > 70 ? "You're maintaining strong momentum. Your completion rate is excellent. Keep focusing on what matters." :
-           stats.completionRate > 40 ? "You're making steady progress. Consider if you're overcommitting. It's okay to kill tasks that no longer serve you." :
-           "It looks like you're capturing a lot but completing less. Try to focus on just 1-3 priorities per day to build momentum."}
-        </p>
-      </div>
-    </>
+      ))}
+    </div>
   );
 }
+
+// ─── Period filter buttons ────────────────────────────────────────────────────
+
+function PeriodFilter({ periods, active, onChange }: {
+  periods: typeof PERIODS;
+  active: number;
+  onChange: (days: number) => void;
+}) {
+  return (
+    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+      {periods.map((p) => (
+        <button
+          key={p.days}
+          onClick={() => onChange(p.days)}
+          style={{
+            fontSize: '12px',
+            color: active === p.days ? 'var(--gold)' : 'var(--text-muted)',
+            fontWeight: active === p.days ? '600' : '400',
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            padding: 0,
+            fontFamily: 'inherit',
+          }}
+        >
+          [{p.label}]
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ─── Section wrapper ──────────────────────────────────────────────────────────
+
+function Section({ icon, title, subtitle, children }: {
+  icon: string;
+  title: string;
+  subtitle: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div style={{ borderTop: '1px solid var(--border)', paddingTop: '20px', paddingBottom: '20px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+        <span>{icon}</span>
+        <span style={{ fontSize: '14px', fontWeight: '600', color: 'var(--text)' }}>{title}</span>
+      </div>
+      <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '14px' }}>
+        // {subtitle}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// ─── Stat line ────────────────────────────────────────────────────────────────
+
+function StatLine({ label, value, trend }: { label: string; value: string; trend?: number }) {
+  return (
+    <div style={{ fontSize: '13px', color: 'var(--text-muted)', lineHeight: '1.8' }}>
+      {label}:{' '}
+      <span style={{ color: 'var(--gold)' }}>{value}</span>
+      {trend !== undefined && trend !== 0 && (
+        <span style={{ color: trend > 0 ? '#4caf50' : 'var(--red)', marginLeft: '6px', fontSize: '11px' }}>
+          {trend > 0 ? `↑${trend}%` : `↓${Math.abs(trend)}%`}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ─── Analytics tab ────────────────────────────────────────────────────────────
+
+function AnalyticsTab() {
+  const { streak } = useVault();
+  const [periodDays, setPeriodDays] = useState(30);
+  const [stats, setStats] = useState<StatsData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const loadStats = useCallback(async (days: number) => {
+    if (!window.bujo) { setLoading(false); return; }
+    setLoading(true);
+    try {
+      const data = await window.bujo.analyticsStats(days);
+      setStats(data);
+    } catch (err) {
+      console.error('Failed to load stats:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadStats(periodDays); }, [periodDays]);
+
+  const handlePeriodChange = (days: number) => {
+    setPeriodDays(days);
+  };
+
+  const totalTracked = stats?.allTime.daysTracked ?? 0;
+  const avgCompletion = stats?.allTime.rate ?? 0;
+  const perfectDays = stats?.allTime.perfectDays ?? 0;
+  const currentStreak = stats?.currentStreak ?? streak;
+  const bestStreak = stats?.bestStreak ?? 0;
+  const trend = stats ? stats.period.rate - stats.period.prevRate : 0;
+
+  return (
+    <div style={{ maxWidth: '640px', margin: '0 auto', padding: '0 24px 40px' }}>
+      {/* Terminal prompt */}
+      <div style={{ fontSize: '13px', marginBottom: '24px', paddingTop: '20px' }}>
+        <span style={{ color: 'var(--gold)' }}>ryan</span>
+        <span style={{ color: 'var(--text-muted)' }}>@</span>
+        <span style={{ color: 'var(--gold)' }}>bujo.vault</span>
+        <span style={{ color: 'var(--text-muted)' }}> $ </span>
+        <span style={{ color: 'var(--text)' }}>stats</span>
+      </div>
+
+      {loading ? (
+        <div style={{ color: 'var(--text-muted)', fontSize: '13px' }}>loading...</div>
+      ) : !window.bujo ? (
+        <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
+          // stats require the desktop app
+        </div>
+      ) : (
+        <>
+          {/* quick glance */}
+          <Section icon="👁" title="quick glance" subtitle="your overall tracking summary">
+            <StatLine label="days tracked" value={totalTracked.toString()} />
+            <StatLine label="avg completion" value={`${avgCompletion}%`} />
+            <StatLine label="perfect days" value={perfectDays.toString()} />
+          </Section>
+
+          {/* streaks */}
+          <Section icon="🔥" title="streaks" subtitle="consecutive days with entries">
+            <StatLine label="current streak" value={`${currentStreak} days`} />
+            <StatLine label="best streak" value={`${bestStreak} days`} />
+          </Section>
+
+          {/* completion rates */}
+          <Section icon="📊" title="completion rates" subtitle="how often you complete scheduled tasks">
+            <div style={{ marginBottom: '12px' }}>
+              <PeriodFilter periods={PERIODS} active={periodDays} onChange={handlePeriodChange} />
+            </div>
+            {stats && (
+              <>
+                <StatLine
+                  label={`${PERIODS.find(p => p.days === periodDays)?.label ?? periodDays + 'd'}`}
+                  value={`${stats.period.rate}%`}
+                  trend={trend}
+                />
+                <StatLine label="all time" value={`${stats.allTime.rate}%`} />
+                <StatLine label="green days" value={`${stats.period.greenDays}/${stats.period.daysTracked}`} />
+                <StatLine label="weekday avg" value={`${stats.period.weekdayAvg}%`} />
+                <StatLine label="weekend avg" value={`${stats.period.weekendAvg}%`} />
+              </>
+            )}
+          </Section>
+
+          {/* contributions */}
+          {stats?.heatmap && Object.keys(stats.heatmap).length > 0 && (
+            <Section icon="📅" title="contributions" subtitle="your activity over the past year">
+              <HeatmapGrid heatmap={stats.heatmap} />
+              <div style={{ marginTop: '10px', fontSize: '11px', color: 'var(--text-muted)' }}>
+                // {totalTracked} days tracked · {avgCompletion}% avg · {perfectDays} perfect days
+              </div>
+            </Section>
+          )}
+
+          {/* day of week */}
+          {stats?.dowRates && (
+            <Section icon="📅" title="day of week" subtitle="completion rates broken down by day">
+              <div style={{ marginBottom: '12px' }}>
+                <PeriodFilter periods={PERIODS} active={periodDays} onChange={handlePeriodChange} />
+              </div>
+              <DowChart rates={stats.dowRates} />
+            </Section>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Monthly review tab ───────────────────────────────────────────────────────
+
+const PERSPECTIVES = [
+  { id: 'chronicle', label: 'chronicle', desc: 'what happened' },
+  { id: 'coach', label: 'coach', desc: 'goals & momentum' },
+  { id: 'relationships', label: 'relationships', desc: 'connection & isolation' },
+  { id: 'strengths', label: 'strengths', desc: 'evidence-based positives' },
+  { id: 'therapist', label: 'therapist', desc: 'emotional patterns' },
+  { id: 'values-meaning', label: 'values', desc: 'alignment & purpose' },
+  { id: 'synthesis', label: 'synthesis', desc: 'combined report' },
+];
 
 function MonthlyReviewTab() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
@@ -124,24 +364,23 @@ function MonthlyReviewTab() {
   const monthLabel = format(currentMonth, 'MMMM yyyy');
 
   const [status, setStatus] = useState<Record<string, boolean>>({});
-  const [activePerspective, setActivePerspective] = useState<string>('chronicle');
+  const [activePerspective, setActivePerspective] = useState('chronicle');
   const [content, setContent] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (window.bujo) {
-      window.bujo.reviewList(monthKey).then(setStatus).catch(console.error);
-    }
+    if (window.bujo) window.bujo.reviewList(monthKey).then(setStatus).catch(console.error);
   }, [monthKey]);
 
   useEffect(() => {
     if (window.bujo && status[activePerspective]) {
       setIsLoading(true);
-      window.bujo.reviewGet(monthKey, activePerspective).then(({ content: c }) => {
-        setContent(c);
-      }).catch(console.error).finally(() => setIsLoading(false));
+      window.bujo.reviewGet(monthKey, activePerspective)
+        .then(({ content: c }: { content: string }) => setContent(c))
+        .catch(console.error)
+        .finally(() => setIsLoading(false));
     } else {
       setContent('');
     }
@@ -151,15 +390,12 @@ function MonthlyReviewTab() {
     if (!window.bujo) return;
     setIsGenerating(true);
     setError('');
-
     try {
       const result = perspective === 'synthesis'
         ? await window.bujo.reviewSynthesize(monthKey)
         : await window.bujo.reviewPerspective(monthKey, perspective);
-
-      if (result.error) {
-        setError(result.error);
-      } else {
+      if (result.error) setError(result.error);
+      else {
         setContent(result.content);
         setStatus(await window.bujo.reviewList(monthKey));
       }
@@ -170,85 +406,132 @@ function MonthlyReviewTab() {
     }
   };
 
-  const prevMonth = () => setCurrentMonth(subMonths(currentMonth, 1));
-  const nextMonth = () => setCurrentMonth(addMonths(currentMonth, 1));
-
   const availableCount = Object.values(status).filter(Boolean).length;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <button onClick={prevMonth} className="p-1.5 rounded-lg hover:bg-zinc-900 text-zinc-500 hover:text-zinc-200 transition-colors"><ChevronLeft size={18} /></button>
-          <span className="text-sm font-medium text-zinc-300">{monthLabel}</span>
-          <button onClick={nextMonth} className="p-1.5 rounded-lg hover:bg-zinc-900 text-zinc-500 hover:text-zinc-200 transition-colors"><ChevronRight size={18} /></button>
-        </div>
-        <span className="text-xs text-zinc-500">{availableCount}/7 perspectives generated</span>
+    <div style={{ maxWidth: '640px', margin: '0 auto', padding: '0 24px 40px' }}>
+      {/* Terminal prompt */}
+      <div style={{ fontSize: '13px', marginBottom: '24px', paddingTop: '20px' }}>
+        <span style={{ color: 'var(--gold)' }}>ryan</span>
+        <span style={{ color: 'var(--text-muted)' }}>@</span>
+        <span style={{ color: 'var(--gold)' }}>bujo.vault</span>
+        <span style={{ color: 'var(--text-muted)' }}> $ </span>
+        <span style={{ color: 'var(--text)' }}>review</span>
       </div>
 
-      <div className="flex gap-2 flex-wrap">
+      {/* Month nav */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px', borderTop: '1px solid var(--border)', paddingTop: '20px' }}>
+        <button onClick={() => setCurrentMonth(subMonths(currentMonth, 1))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
+          <ChevronLeft size={14} />
+        </button>
+        <span style={{ fontSize: '13px', color: 'var(--text)' }}>{monthLabel.toLowerCase()}</span>
+        <button onClick={() => setCurrentMonth(addMonths(currentMonth, 1))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
+          <ChevronRight size={14} />
+        </button>
+        <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: 'auto' }}>
+          {availableCount}/7 perspectives
+        </span>
+      </div>
+
+      {/* Perspective tabs */}
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '20px' }}>
         {PERSPECTIVES.map((p) => (
           <button
             key={p.id}
             onClick={() => setActivePerspective(p.id)}
-            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-              activePerspective === p.id ? 'bg-zinc-800 text-zinc-100' :
-              status[p.id] ? 'text-zinc-300 hover:bg-zinc-900' : 'text-zinc-600 hover:bg-zinc-900 hover:text-zinc-400'
-            }`}
+            style={{
+              fontSize: '12px',
+              color: activePerspective === p.id ? 'var(--gold)' : status[p.id] ? 'var(--text)' : 'var(--text-faint)',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              padding: 0,
+              textDecoration: activePerspective === p.id ? 'underline' : 'none',
+              textUnderlineOffset: '3px',
+              textDecorationColor: 'var(--gold)',
+            }}
           >
-            {p.icon}
-            {p.label}
-            {status[p.id] && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
+            [{p.label}{status[p.id] ? ' ●' : ''}]
           </button>
         ))}
       </div>
 
-      <div className="bg-zinc-900/30 rounded-2xl p-6">
-        <div className="flex items-center justify-between mb-4">
+      {/* Content area */}
+      <div style={{ borderTop: '1px solid var(--border)', paddingTop: '20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
           <div>
-            <h3 className="text-base font-medium text-zinc-100">{PERSPECTIVES.find(p => p.id === activePerspective)?.label}</h3>
-            <p className="text-xs text-zinc-500">{PERSPECTIVES.find(p => p.id === activePerspective)?.desc}</p>
+            <div style={{ fontSize: '14px', fontWeight: '600', color: 'var(--text)' }}>
+              {PERSPECTIVES.find(p => p.id === activePerspective)?.label}
+            </div>
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+              // {PERSPECTIVES.find(p => p.id === activePerspective)?.desc}
+            </div>
           </div>
           <button
             onClick={() => handleGenerate(activePerspective)}
             disabled={isGenerating}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-500/20 text-indigo-300 rounded-lg hover:bg-indigo-500/30 transition-colors text-sm font-medium disabled:opacity-50"
+            style={{
+              fontSize: '12px',
+              color: 'var(--gold)',
+              background: 'none',
+              border: '1px solid var(--gold-dim)',
+              borderRadius: '4px',
+              padding: '4px 12px',
+              cursor: isGenerating ? 'not-allowed' : 'pointer',
+              fontFamily: 'inherit',
+              opacity: isGenerating ? 0.5 : 1,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
           >
-            {isGenerating ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-            {status[activePerspective] ? 'Regenerate' : 'Generate'}
+            {isGenerating ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Sparkles size={12} />}
+            {status[activePerspective] ? 'regen' : 'generate'}
           </button>
         </div>
 
-        {error && <p className="text-xs text-red-400 mb-4">{error}</p>}
+        {error && <div style={{ fontSize: '12px', color: 'var(--red)', marginBottom: '12px' }}>{error}</div>}
 
         {isLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 size={20} className="animate-spin text-zinc-500" />
-          </div>
+          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>loading...</div>
         ) : content ? (
-          <div className="prose prose-invert prose-sm max-w-none">
-            <pre className="whitespace-pre-wrap font-sans text-sm text-zinc-300 leading-relaxed">{content}</pre>
-          </div>
+          <pre style={{ fontSize: '12px', color: 'var(--text)', lineHeight: '1.7', whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>
+            {content}
+          </pre>
         ) : (
-          <div className="text-center py-12">
-            <p className="text-zinc-500 text-sm mb-2">No analysis generated yet</p>
-            <p className="text-zinc-600 text-xs">Click Generate to analyze your {monthLabel} entries from the {PERSPECTIVES.find(p => p.id === activePerspective)?.label} perspective</p>
+          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+            <div>// no analysis generated yet</div>
+            <div style={{ marginTop: '4px', color: 'var(--text-faint)' }}>
+              // click generate to analyze {monthLabel.toLowerCase()} from the {PERSPECTIVES.find(p => p.id === activePerspective)?.label} perspective
+            </div>
           </div>
         )}
       </div>
 
       {activePerspective !== 'synthesis' && availableCount >= 3 && !status['synthesis'] && (
-        <div className="bg-indigo-500/10 rounded-2xl p-6 flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium text-indigo-300">Ready for synthesis</p>
-            <p className="text-xs text-zinc-400">Combine all perspectives into a final report</p>
+        <div style={{ marginTop: '24px', borderTop: '1px solid var(--border)', paddingTop: '20px' }}>
+          <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>
+            // {availableCount} perspectives available — ready for synthesis
           </div>
           <button
             onClick={() => { setActivePerspective('synthesis'); handleGenerate('synthesis'); }}
             disabled={isGenerating}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-500/20 text-indigo-300 rounded-lg hover:bg-indigo-500/30 transition-colors text-sm font-medium disabled:opacity-50"
+            style={{
+              fontSize: '12px',
+              color: 'var(--gold)',
+              background: 'none',
+              border: '1px solid var(--gold-dim)',
+              borderRadius: '4px',
+              padding: '4px 12px',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
           >
-            <Sparkles size={14} /> Synthesize
+            <Sparkles size={12} /> synthesize
           </button>
         </div>
       )}
@@ -256,11 +539,38 @@ function MonthlyReviewTab() {
   );
 }
 
-function StatCard({ icon, title, value }: { icon: React.ReactNode; title: string; value: string }) {
+// ─── ReviewView ───────────────────────────────────────────────────────────────
+
+export function ReviewView() {
+  const [tab, setTab] = useState<'stats' | 'review'>('stats');
+
   return (
-    <div className="p-4 bg-zinc-900/30 rounded-2xl flex flex-col gap-2">
-      <div className="flex items-center gap-2 text-zinc-400 text-sm font-medium">{icon}{title}</div>
-      <div className="text-2xl font-light text-zinc-100">{value}</div>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      {/* Sub-tab bar */}
+      <div style={{ display: 'flex', gap: '20px', padding: '0 24px', borderBottom: '1px solid var(--border)' }}>
+        {(['stats', 'review'] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            style={{
+              fontSize: '12px',
+              color: tab === t ? 'var(--text)' : 'var(--text-faint)',
+              background: 'none',
+              border: 'none',
+              borderBottom: tab === t ? '1px solid var(--gold)' : '1px solid transparent',
+              padding: '10px 0',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ flex: 1, overflowY: 'auto' }} className="scrollbar-hide">
+        {tab === 'stats' ? <AnalyticsTab /> : <MonthlyReviewTab />}
+      </div>
     </div>
   );
 }
