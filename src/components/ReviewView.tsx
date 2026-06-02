@@ -2,11 +2,11 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useVault } from '../store/VaultContext';
 import { Sparkles, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { format, subMonths, addMonths, subDays, startOfWeek, addDays } from 'date-fns';
+import { generateReview, getHeatmap, getReview, getStats, hasDesktopApi, listReviews } from '../services/desktop';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface StatsData {
-  heatmap: Record<string, number>;
   period: {
     rate: number;
     prevRate: number;
@@ -15,13 +15,13 @@ interface StatsData {
     weekdayAvg: number;
     weekendAvg: number;
   };
-  dowRates: number[]; // [sun, mon, tue, wed, thu, fri, sat]
+  dowRates: number[];
   allTime: { rate: number; daysTracked: number; perfectDays: number };
   bestStreak: number;
   currentStreak: number;
 }
 
-// ─── Period config ────────────────────────────────────────────────────────────
+type HeatmapData = Record<string, { count: number; rate: number }>;
 
 const PERIODS: { label: string; days: number }[] = [
   { label: '14d', days: 14 },
@@ -34,26 +34,24 @@ const PERIODS: { label: string; days: number }[] = [
 
 // ─── Heatmap ──────────────────────────────────────────────────────────────────
 
-function HeatmapGrid({ heatmap }: { heatmap: Record<string, number> }) {
+function HeatmapGrid({ heatmap }: { heatmap: HeatmapData }) {
   const today = new Date();
-  // Build 52 weeks of data (364 days back from today, aligned to weeks)
-  const startDate = startOfWeek(subDays(today, 363), { weekStartsOn: 1 }); // start on Monday
+  const startDate = startOfWeek(subDays(today, 363), { weekStartsOn: 1 });
 
-  const weeks: { date: Date; count: number }[][] = [];
+  const weeks: { date: Date; data: { count: number; rate: number } | null }[][] = [];
   let current = startDate;
 
   while (current <= today) {
-    const week: { date: Date; count: number }[] = [];
+    const week: { date: Date; data: { count: number; rate: number } | null }[] = [];
     for (let d = 0; d < 7; d++) {
       const dateStr = format(addDays(current, d), 'yyyy-MM-dd');
       const dayDate = addDays(current, d);
-      week.push({ date: dayDate, count: heatmap[dateStr] || 0 });
+      week.push({ date: dayDate, data: heatmap[dateStr] || null });
     }
     weeks.push(week);
     current = addDays(current, 7);
   }
 
-  // Month labels: find first week where month changes
   const monthLabels: { col: number; label: string }[] = [];
   let lastMonth = -1;
   weeks.forEach((week, i) => {
@@ -64,15 +62,14 @@ function HeatmapGrid({ heatmap }: { heatmap: Record<string, number> }) {
     }
   });
 
-  const maxCount = Math.max(1, ...Object.values(heatmap));
-
-  function cellColor(count: number): string {
-    if (count === 0) return '#222222';
-    const intensity = count / maxCount;
-    if (intensity < 0.25) return '#5c4a10';
-    if (intensity < 0.5) return '#8a6f1a';
-    if (intensity < 0.75) return '#c9a227';
-    return '#e8bf45';
+  function cellColor(data: { count: number; rate: number } | null): string {
+    if (!data || data.count === 0) return '#222222';
+    const { rate, count } = data;
+    if (rate >= 1.0) return 'var(--green)';
+    if (rate >= 0.7) return 'var(--green-light)';
+    if (rate >= 0.4) return 'var(--gold)';
+    if (rate > 0) return 'var(--gold-dim)';
+    return 'var(--red)';
   }
 
   const DOW_LABELS = ['m', '', 'w', '', 'f', '', 's'];
@@ -109,12 +106,12 @@ function HeatmapGrid({ heatmap }: { heatmap: Record<string, number> }) {
               {week.map((day, di) => (
                 <div
                   key={di}
-                  title={`${format(day.date, 'MMM d')}: ${day.count} entries`}
+                  title={day.data ? `${format(day.date, 'MMM d')}: ${Math.round(day.data.rate * 100)}% completion (${day.data.count} entries)` : `${format(day.date, 'MMM d')}: no entries`}
                   style={{
                     width: '10px',
                     height: '10px',
                     borderRadius: '2px',
-                    background: day.date > today ? 'transparent' : cellColor(day.count),
+                    background: day.date > today ? 'transparent' : cellColor(day.data),
                     flexShrink: 0,
                   }}
                 />
@@ -126,11 +123,17 @@ function HeatmapGrid({ heatmap }: { heatmap: Record<string, number> }) {
 
       {/* Legend */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '6px', marginLeft: '18px' }}>
-        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>// less</span>
-        {['#222222', '#5c4a10', '#8a6f1a', '#c9a227', '#e8bf45'].map((c, i) => (
-          <div key={i} style={{ width: '10px', height: '10px', borderRadius: '2px', background: c }} />
+        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>// none</span>
+        {[
+          { color: 'var(--red)', label: '' },
+          { color: 'var(--gold-dim)', label: '' },
+          { color: 'var(--gold)', label: '' },
+          { color: 'var(--green-light)', label: '' },
+          { color: 'var(--green)', label: 'perfect' },
+        ].map((c, i) => (
+          <div key={i} style={{ width: '10px', height: '10px', borderRadius: '2px', background: c.color }} />
         ))}
-        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>more</span>
+        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>perfect</span>
       </div>
     </div>
   );
@@ -241,14 +244,15 @@ function AnalyticsTab() {
   const { streak } = useVault();
   const [periodDays, setPeriodDays] = useState(30);
   const [stats, setStats] = useState<StatsData | null>(null);
+  const [heatmapData, setHeatmapData] = useState<HeatmapData | null>(null);
   const [loading, setLoading] = useState(true);
 
   const loadStats = useCallback(async (days: number) => {
-    if (!window.bujo) { setLoading(false); return; }
+    if (!hasDesktopApi()) { setLoading(false); return; }
     setLoading(true);
     try {
-      const data = await window.bujo.analyticsStats(days);
-      setStats(data);
+      const data = await getStats(days);
+      if (data) setStats(data);
     } catch (err) {
       console.error('Failed to load stats:', err);
     } finally {
@@ -256,7 +260,15 @@ function AnalyticsTab() {
     }
   }, []);
 
-  useEffect(() => { loadStats(periodDays); }, [periodDays]);
+  useEffect(() => {
+    loadStats(periodDays);
+  }, [periodDays, loadStats]);
+
+  useEffect(() => {
+    getHeatmap().then(data => {
+      if (data) setHeatmapData(data);
+    }).catch(console.error);
+  }, []);
 
   const handlePeriodChange = (days: number) => {
     setPeriodDays(days);
@@ -282,7 +294,7 @@ function AnalyticsTab() {
 
       {loading ? (
         <div style={{ color: 'var(--text-muted)', fontSize: '13px' }}>loading...</div>
-      ) : !window.bujo ? (
+      ) : !hasDesktopApi() ? (
         <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
           // stats require the desktop app
         </div>
@@ -322,9 +334,9 @@ function AnalyticsTab() {
           </Section>
 
           {/* contributions */}
-          {stats?.heatmap && Object.keys(stats.heatmap).length > 0 && (
+          {heatmapData && Object.keys(heatmapData).length > 0 && (
             <Section icon="📅" title="contributions" subtitle="your activity over the past year">
-              <HeatmapGrid heatmap={stats.heatmap} />
+              <HeatmapGrid heatmap={heatmapData || {}} />
               <div style={{ marginTop: '10px', fontSize: '11px', color: 'var(--text-muted)' }}>
                 // {totalTracked} days tracked · {avgCompletion}% avg · {perfectDays} perfect days
               </div>
@@ -371,14 +383,14 @@ function MonthlyReviewTab() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (window.bujo) window.bujo.reviewList(monthKey).then(setStatus).catch(console.error);
+    listReviews(monthKey).then(setStatus).catch(console.error);
   }, [monthKey]);
 
   useEffect(() => {
-    if (window.bujo && status[activePerspective]) {
+    if (status[activePerspective]) {
       setIsLoading(true);
-      window.bujo.reviewGet(monthKey, activePerspective)
-        .then(({ content: c }: { content: string }) => setContent(c))
+      getReview(monthKey, activePerspective)
+        .then((result) => setContent(result?.content ?? ''))
         .catch(console.error)
         .finally(() => setIsLoading(false));
     } else {
@@ -387,17 +399,15 @@ function MonthlyReviewTab() {
   }, [monthKey, activePerspective, status]);
 
   const handleGenerate = async (perspective: string) => {
-    if (!window.bujo) return;
     setIsGenerating(true);
     setError('');
     try {
-      const result = perspective === 'synthesis'
-        ? await window.bujo.reviewSynthesize(monthKey)
-        : await window.bujo.reviewPerspective(monthKey, perspective);
-      if (result.error) setError(result.error);
+      const result = await generateReview(monthKey, perspective, Boolean(status[perspective]));
+      if (!result) setError('desktop app required');
+      else if (result.error) setError(result.error);
       else {
         setContent(result.content);
-        setStatus(await window.bujo.reviewList(monthKey));
+        setStatus(await listReviews(monthKey));
       }
     } catch (err: any) {
       setError(err.message);

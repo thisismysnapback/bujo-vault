@@ -6,17 +6,20 @@ import { InputBar } from './InputBar';
 import { format, addDays, subDays } from 'date-fns';
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon } from 'lucide-react';
 
-import { EntryType } from '../types';
-
-const ENTRY_SORT_ORDER: Record<string, number> = {
-  priority: 0, task: 1, event: 2, note: 3, killed: 4, done: 5, migrated: 6, scheduled: 6,
-};
+import { entrySortKey } from '../lib/entryModel';
+import { getCoachNudge, loadTodayHabits, summarizeDay, toggleHabitCompletion } from '../services/desktop';
 
 export function DailyView() {
   const { logs, updateEntry, clearDay } = useVault();
   const [date, setDate] = useState(getTodayDateString());
   const [greeting, setGreeting] = useState(getGreeting());
   const [focusedIndex, setFocusedIndex] = useState(-1);
+  const [nudge, setNudge] = useState<string>('');
+  const [nudgeDismissed, setNudgeDismissed] = useState(false);
+  const [todayHabits, setTodayHabits] = useState<Array<{ id: string; name: string; emoji?: string }>>([]);
+  const [habitCompletions, setHabitCompletions] = useState<string[]>([]);
+  const [summary, setSummary] = useState<string>('');
+  const [isSummarizing, setIsSummarizing] = useState(false);
 
   const dateRef = useRef(date);
   const focusedRef = useRef(focusedIndex);
@@ -45,6 +48,25 @@ export function DailyView() {
     }
   }, [date, logs]);
 
+  // Load coach nudge for today
+  useEffect(() => {
+    if (date !== getTodayDateString()) return;
+    const dismissed = sessionStorage.getItem(`bujo:nudge:dismissed:${date}`);
+    if (dismissed) return;
+    getCoachNudge(date).then(data => {
+      if (data.nudge) setNudge(data.nudge);
+    }).catch(() => {});
+  }, [date]);
+
+  // Load today's habits and persisted completions for the inline strip
+  useEffect(() => {
+    if (date !== getTodayDateString()) return;
+    loadTodayHabits(date).then(({ habits, completedIds }) => {
+      setTodayHabits(habits);
+      setHabitCompletions(completedIds);
+    }).catch(() => {});
+  }, [date]);
+
   const handlePrevDay = () => {
     const d = new Date(date);
     d.setMinutes(d.getMinutes() + d.getTimezoneOffset());
@@ -68,7 +90,7 @@ export function DailyView() {
 
   const dayLog = logs[date] || { date, entries: [] };
   const sortedEntries = [...dayLog.entries].sort(
-    (a, b) => (ENTRY_SORT_ORDER[a.type] ?? 99) - (ENTRY_SORT_ORDER[b.type] ?? 99)
+    (a, b) => entrySortKey(a) - entrySortKey(b)
   );
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -82,7 +104,7 @@ export function DailyView() {
       e.preventDefault();
       const log = logs[dateRef.current];
       const sorted = log ? [...log.entries].sort(
-        (a, b) => (ENTRY_SORT_ORDER[a.type] ?? 99) - (ENTRY_SORT_ORDER[b.type] ?? 99)
+        (a, b) => entrySortKey(a) - entrySortKey(b)
       ) : [];
       const max = Math.max(0, sorted.length - 1);
       setFocusedIndex((prev) => Math.min(max, prev + 1));
@@ -92,12 +114,12 @@ export function DailyView() {
       const log = logs[dateRef.current];
       if (log) {
         const sorted = [...log.entries].sort(
-          (a, b) => (ENTRY_SORT_ORDER[a.type] ?? 99) - (ENTRY_SORT_ORDER[b.type] ?? 99)
+          (a, b) => entrySortKey(a) - entrySortKey(b)
         );
         const entry = sorted[focusedRef.current];
-        if (entry && entry.type === 'task') {
+        if (entry && entry.kind === 'task' && entry.status === 'active') {
           updateEntry(dateRef.current, entry.id, { type: 'done' });
-        } else if (entry && entry.type === 'done') {
+        } else if (entry && entry.kind === 'task' && entry.status === 'done') {
           updateEntry(dateRef.current, entry.id, { type: 'task' });
         }
       }
@@ -105,10 +127,10 @@ export function DailyView() {
       const log = logs[dateRef.current];
       if (log) {
         const sorted = [...log.entries].sort(
-          (a, b) => (ENTRY_SORT_ORDER[a.type] ?? 99) - (ENTRY_SORT_ORDER[b.type] ?? 99)
+          (a, b) => entrySortKey(a) - entrySortKey(b)
         );
         const entry = sorted[focusedRef.current];
-        if (entry && entry.type !== 'killed') {
+        if (entry && entry.status !== 'killed') {
           updateEntry(dateRef.current, entry.id, { type: 'killed' });
         }
       }
@@ -116,16 +138,16 @@ export function DailyView() {
       const log = logs[dateRef.current];
       if (log) {
         const sorted = [...log.entries].sort(
-          (a, b) => (ENTRY_SORT_ORDER[a.type] ?? 99) - (ENTRY_SORT_ORDER[b.type] ?? 99)
+          (a, b) => entrySortKey(a) - entrySortKey(b)
         );
         const entry = sorted[focusedRef.current];
-        if (entry && entry.type !== 'migrated') {
+        if (entry && entry.status !== 'migrated') {
           updateEntry(dateRef.current, entry.id, { type: 'migrated' });
         }
       }
     } else if (e.key === 'Delete' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
-      clearDay(getTodayDateString());
+      clearDay(dateRef.current);
       setFocusedIndex(-1);
     }
   }, [logs, updateEntry, clearDay]);
@@ -136,6 +158,25 @@ export function DailyView() {
   }, [handleKeyDown]);
 
   const isToday = date === getTodayDateString();
+
+  const toggleHabit = useCallback(async (habitId: string) => {
+    const result = await toggleHabitCompletion(habitId, date);
+    if (!result) return;
+    setHabitCompletions(prev =>
+      result.completed ? [...prev, habitId] : prev.filter(id => id !== habitId)
+    );
+  }, [date]);
+
+  const handleSummarize = useCallback(async () => {
+    setIsSummarizing(true);
+    setSummary('');
+    try {
+      const result = await summarizeDay(date);
+      setSummary(result.summary || `// ${result.error || 'summary unavailable'}`);
+    } finally {
+      setIsSummarizing(false);
+    }
+  }, [date]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
@@ -182,6 +223,12 @@ export function DailyView() {
             {format(new Date(date + 'T12:00:00'), 'EEEE, MMMM do').toLowerCase()}
           </h1>
           {isToday && <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '4px 0 0' }}>// {greeting}</p>}
+          {!isToday && (
+            <button onClick={handleSummarize} disabled={isSummarizing} style={{ marginTop: '8px', background: 'transparent', border: 'none', color: 'var(--gold)', fontFamily: 'monospace', fontSize: '12px', cursor: 'pointer', padding: 0 }}>
+              [{isSummarizing ? 'summarizing...' : 'summarize'}]
+            </button>
+          )}
+          {summary && <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', color: 'var(--text-muted)', fontSize: '12px', marginTop: '10px', borderTop: '1px solid var(--border)', paddingTop: '8px' }}>{summary}</pre>}
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginBottom: '32px' }}>
@@ -195,6 +242,7 @@ export function DailyView() {
                 key={entry.id}
                 entry={entry}
                 date={date}
+                source={{ kind: 'daily', date }}
                 isFocused={focusedIndex === idx}
               />
             ))
@@ -203,6 +251,47 @@ export function DailyView() {
       </div>
 
       <div style={{ padding: '16px 24px 24px', maxWidth: '640px', margin: '0 auto', width: '100%' }}>
+        {/* Habit strip — today only */}
+        {isToday && todayHabits.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', marginBottom: '12px', borderTop: '1px solid var(--border)', paddingTop: '10px', fontSize: '12px' }}>
+            {todayHabits.map(h => {
+              const done = habitCompletions.includes(h.id);
+              return (
+                <button
+                  key={h.id}
+                  onClick={() => toggleHabit(h.id)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: done ? 'var(--green)' : 'var(--text-muted)',
+                    fontFamily: 'inherit',
+                    fontSize: '12px',
+                    padding: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                  }}
+                >
+                  <span style={{ color: done ? 'var(--green)' : 'var(--text-faint)' }}>[{done ? 'x' : ' '}]</span>
+                  {h.emoji ? `${h.emoji} ` : ''}{h.name}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {nudge && isToday && !nudgeDismissed && (
+          <div style={{ fontSize: '12px', color: 'var(--gold-dim)', padding: '8px 0', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <span>// coach: {nudge}</span>
+            <button
+              onClick={() => { setNudgeDismissed(true); sessionStorage.setItem(`bujo:nudge:dismissed:${date}`, '1'); }}
+              style={{ background: 'none', border: 'none', color: 'var(--text-faint)', cursor: 'pointer', padding: '0 0 0 8px', fontSize: '12px', lineHeight: 1 }}
+            >
+              ×
+            </button>
+          </div>
+        )}
         <InputBar date={date} />
       </div>
     </div>

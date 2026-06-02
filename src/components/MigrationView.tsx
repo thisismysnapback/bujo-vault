@@ -1,16 +1,20 @@
 import React, { useState } from 'react';
 import { useVault } from '../store/VaultContext';
-import { DailyLog, Entry, EntryType } from '../types';
+import { DailyLog, Entry } from '../types';
 import { format, addDays } from 'date-fns';
-import { ArrowRight, Check, X } from 'lucide-react';
+import { ArrowRight, Check, X, Sparkles } from 'lucide-react';
+import { analyzeMigrationTask } from '../services/desktop';
+
+const DAILY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export function MigrationView() {
   const { logs, updateEntry, migrateEntry } = useVault();
 
   const pendingTasks: Array<{ date: string; entry: Entry }> = [];
   for (const [date, log] of Object.entries(logs) as [string, DailyLog][]) {
+    if (!DAILY_KEY_RE.test(date)) continue;
     for (const entry of log.entries) {
-      if (entry.type === 'task' || entry.type === 'priority' || entry.type === 'scheduled') {
+      if (entry.kind === 'task' && entry.status === 'active') {
         pendingTasks.push({ date, entry });
       }
     }
@@ -18,76 +22,148 @@ export function MigrationView() {
   pendingTasks.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   const [processed, setProcessed] = useState<Set<string>>(new Set());
+  const [analysis, setAnalysis] = useState<Record<string, string>>({});
+  const [analyzing, setAnalyzing] = useState<string | null>(null);
+  const [pendingActionIds, setPendingActionIds] = useState<Set<string>>(new Set());
+  const [actionErrors, setActionErrors] = useState<Record<string, string>>({});
+
+  const runAction = async (entry: Entry, action: () => Promise<void>) => {
+    setPendingActionIds(prev => new Set([...prev, entry.id]));
+    setActionErrors(prev => ({ ...prev, [entry.id]: '' }));
+    try {
+      await action();
+      setProcessed(prev => new Set([...prev, entry.id]));
+    } catch (err: any) {
+      setActionErrors(prev => ({ ...prev, [entry.id]: err?.message || 'action failed' }));
+    } finally {
+      setPendingActionIds(prev => {
+        const next = new Set(prev);
+        next.delete(entry.id);
+        return next;
+      });
+    }
+  };
 
   const handleMigrate = (date: string, entry: Entry) => {
     const tomorrow = format(addDays(new Date(), 1), 'yyyy-MM-dd');
-    migrateEntry(entry.id, date, tomorrow);
-    setProcessed(prev => new Set([...prev, entry.id]));
+    void runAction(entry, () => migrateEntry(entry.id, date, tomorrow));
   };
 
   const handleKill = (date: string, entry: Entry) => {
-    updateEntry(date, entry.id, { type: 'killed' });
-    setProcessed(prev => new Set([...prev, entry.id]));
+    void runAction(entry, () => updateEntry(date, entry.id, { type: 'killed' }));
   };
 
   const handleDone = (date: string, entry: Entry) => {
-    updateEntry(date, entry.id, { type: 'done' });
-    setProcessed(prev => new Set([...prev, entry.id]));
+    void runAction(entry, () => updateEntry(date, entry.id, { type: 'done' }));
+  };
+
+  const handleAnalyze = async (entry: Entry) => {
+    setAnalyzing(entry.id);
+    try {
+      const result = await analyzeMigrationTask({ text: entry.content, count: 1 });
+      setAnalysis(prev => ({ ...prev, [entry.id]: result.analysis }));
+    } finally {
+      setAnalyzing(null);
+    }
   };
 
   const remaining = pendingTasks.filter(t => !processed.has(t.entry.id));
 
+  const actionBtnStyle = (color: string): React.CSSProperties => ({
+    background: 'transparent',
+    border: 'none',
+    color: 'var(--text-muted)',
+    cursor: 'pointer',
+    padding: '6px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  });
+
+  const entryColor = (entry: Entry): string => {
+    if (entry.meta?.priority) return 'var(--gold-bright)';
+    if (entry.meta?.scheduledFor) return 'var(--gold)';
+    return 'var(--text)';
+  };
+
   return (
-    <div className="flex flex-col h-full bg-zinc-950 text-zinc-100 overflow-hidden">
-      <div className="px-8 pt-12 pb-4 max-w-3xl mx-auto w-full">
-        <h1 className="text-4xl font-serif font-light tracking-tight text-zinc-100 mb-2">
-          Migration
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      <div style={{ padding: '48px 32px 16px', maxWidth: '768px', width: '100%', margin: '0 auto' }}>
+        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+          ryan@bujo.vault $ migrate
+        </div>
+        <h1 style={{ fontSize: '28px', fontWeight: 300, letterSpacing: '-0.02em', color: 'var(--text)', margin: '4px 0 2px' }}>
+          migration
         </h1>
-        <p className="text-zinc-500 font-sans">
-          {remaining.length} pending {remaining.length === 1 ? 'task' : 'tasks'} to review
+        <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+          // {remaining.length} pending {remaining.length === 1 ? 'task' : 'tasks'} to review
         </p>
       </div>
 
-      <div className="flex-1 overflow-y-auto scrollbar-hide px-8 py-4 max-w-3xl mx-auto w-full">
+      <div className="scrollbar-hide" style={{ flex: 1, overflowY: 'auto', padding: '16px 32px', maxWidth: '768px', width: '100%', margin: '0 auto' }}>
         {remaining.length === 0 ? (
-          <div className="text-zinc-600 italic py-4 text-sm text-center">
-            All caught up. No pending tasks to migrate.
+          <div style={{ color: 'var(--text-faint)', fontStyle: 'italic', fontSize: '12px', padding: '16px 0', textAlign: 'center' }}>
+            // all caught up. no pending tasks to migrate
           </div>
         ) : (
-          <div className="space-y-1">
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: '8px' }}>
             {remaining.map(({ date, entry }) => (
               <div
                 key={entry.id}
-                className="group flex items-center gap-3 py-2 px-3 rounded-md hover:bg-zinc-900/30 transition-colors"
+                className="group"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  padding: '8px 0',
+                  borderTop: '1px solid var(--border)',
+                }}
               >
-                <span className="text-xs text-zinc-600 w-20 flex-shrink-0">
+                <span style={{ fontSize: '11px', color: 'var(--text-faint)', width: '56px', flexShrink: 0 }}>
                   {format(new Date(date + 'T12:00:00'), 'MMM d')}
                 </span>
-                <span className={`flex-1 text-sm ${
-                  entry.type === 'priority' ? 'text-yellow-400 font-medium' :
-                  entry.type === 'scheduled' ? 'text-amber-400' :
-                  'text-zinc-300'
-                }`}>
-                  {entry.content}
-                </span>
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div style={{ flex: 1 }}>
+                  <span style={{ fontSize: '13px', color: entryColor(entry) }}>
+                    {entry.content}
+                  </span>
+                  {actionErrors[entry.id] && (
+                    <div style={{ fontSize: '12px', color: 'var(--red)', margin: '6px 0 0' }}>// {actionErrors[entry.id]}</div>
+                  )}
+                  {(analyzing === entry.id || pendingActionIds.has(entry.id) || analysis[entry.id]) && (
+                    <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: '12px', color: 'var(--gold-dim)', margin: '6px 0 0' }}>
+                      {pendingActionIds.has(entry.id) ? '// saving...' : analyzing === entry.id ? '// analyzing...' : analysis[entry.id]}
+                    </pre>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: '2px', opacity: 0, transition: 'opacity 0.15s' }} className="group-hover:opacity-100">
                   <button
+                    disabled={pendingActionIds.has(entry.id)}
+                    onClick={() => handleAnalyze(entry)}
+                    style={actionBtnStyle('var(--gold)')}
+                    title="Analyze with AI"
+                  >
+                    <Sparkles size={14} />
+                  </button>
+                  <button
+                    disabled={pendingActionIds.has(entry.id)}
                     onClick={() => handleDone(date, entry)}
-                    className="p-1.5 rounded hover:bg-emerald-500/20 text-zinc-500 hover:text-emerald-400 transition-colors"
+                    style={actionBtnStyle('#4caf50')}
                     title="Mark done"
                   >
                     <Check size={14} />
                   </button>
                   <button
+                    disabled={pendingActionIds.has(entry.id)}
                     onClick={() => handleMigrate(date, entry)}
-                    className="p-1.5 rounded hover:bg-indigo-500/20 text-zinc-500 hover:text-indigo-400 transition-colors"
+                    style={actionBtnStyle('var(--gold)')}
                     title="Migrate to tomorrow"
                   >
                     <ArrowRight size={14} />
                   </button>
                   <button
+                    disabled={pendingActionIds.has(entry.id)}
                     onClick={() => handleKill(date, entry)}
-                    className="p-1.5 rounded hover:bg-red-500/20 text-zinc-500 hover:text-red-400 transition-colors"
+                    style={actionBtnStyle('var(--red)')}
                     title="Kill"
                   >
                     <X size={14} />

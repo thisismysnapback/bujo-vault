@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Key, Database, Github, AlertTriangle, Download, Folder, CheckCircle, FolderOpen, XCircle } from 'lucide-react';
 import { useVault } from '../store/VaultContext';
 import { DailyLog } from '../types';
+import { entrySymbol } from '../lib/entryModel';
+import { clearDays, loadSettings, pickVaultFolder, saveSettings } from '../services/desktop';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 
@@ -10,24 +12,30 @@ export function SettingsView() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [vaultPath, setVaultPath] = useState('');
   const [apiKey, setApiKey] = useState('');
-  const [model, setModel] = useState('openai/gpt-4o-2024-11-20');
+  const [provider, setProvider] = useState<'minimax' | 'openrouter'>('minimax');
+  const [model, setModel] = useState('MiniMax-M3');
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
 
   useEffect(() => {
-    if (!window.bujo) return;
-    window.bujo.vaultInfo().then(info => setVaultPath(info.path)).catch(() => {});
-    window.bujo.configGet().then(cfg => {
-      setApiKey(cfg.api_key || '');
-      setModel(cfg.model || 'openai/gpt-4o-2024-11-20');
+    loadSettings().then(result => {
+      if (!result) return;
+      setVaultPath(result.vaultPath);
+      setApiKey(result.config.has_api_key ? result.config.api_key_preview : '');
+      setProvider((result.config.provider === 'openrouter' ? 'openrouter' : 'minimax'));
+      setModel(result.config.model || (result.config.provider === 'openrouter' ? 'minimax/minimax-m2.7' : 'MiniMax-M3'));
     }).catch(() => {});
   }, []);
 
   const handleSaveConfig = async () => {
-    if (!window.bujo) {
-      // Fallback: write config directly
+    setStatus('saving');
+    try {
+      const apiKeyToSave = apiKey.includes('…') ? '' : apiKey;
+      const result = await saveSettings({ api_key: apiKeyToSave, provider, model, vault_path: vaultPath, theme: 'dark' });
+      if (!result) {
       try {
         localStorage.setItem('bujo-api-key', apiKey);
+        localStorage.setItem('bujo-provider', provider);
         localStorage.setItem('bujo-model', model);
         setStatus('saved');
         setTimeout(() => setStatus('idle'), 3000);
@@ -37,10 +45,7 @@ export function SettingsView() {
         setTimeout(() => setStatus('idle'), 5000);
       }
       return;
-    }
-    setStatus('saving');
-    try {
-      await window.bujo.configSave({ api_key: apiKey, model, vault_path: vaultPath, theme: 'dark' });
+      }
       setStatus('saved');
       setTimeout(() => setStatus('idle'), 3000);
     } catch (err: any) {
@@ -51,18 +56,15 @@ export function SettingsView() {
   };
 
   const handlePickVaultFolder = async () => {
-    if (!window.bujo) return;
-    const result = await window.bujo.vaultPickFolder();
-    if (result.path) {
-      setVaultPath(result.path);
+    const path = await pickVaultFolder();
+    if (path) {
+      setVaultPath(path);
     }
   };
 
   const handleClearData = async () => {
-    if (!window.bujo) return;
     const dates = Object.keys(logs);
-    await Promise.all(dates.map(date => window.bujo.clearDay(date)));
-    window.location.reload();
+    if (await clearDays(dates)) window.location.reload();
   };
 
   const handleExport = async () => {
@@ -70,14 +72,7 @@ export function SettingsView() {
     (Object.values(logs) as DailyLog[]).forEach(log => {
       let content = `# ${log.date}\n\n`;
       log.entries.forEach(e => {
-        let symbol = '-';
-        if (e.type === 'task') symbol = '- [ ]';
-        if (e.type === 'done') symbol = '- [x]';
-        if (e.type === 'migrated') symbol = '- [>]';
-        if (e.type === 'killed') symbol = '- [~]';
-        if (e.type === 'event') symbol = '○';
-        if (e.type === 'note') symbol = '-';
-        if (e.type === 'priority') symbol = '*';
+        const symbol = entrySymbol(e);
         content += `${symbol} ${e.content}\n`;
       });
       zip.file(`${log.date}.md`, content);
@@ -86,105 +81,205 @@ export function SettingsView() {
     saveAs(blob, 'bujo-vault.zip');
   };
 
+  const sectionStyle: React.CSSProperties = {
+    borderTop: '1px solid var(--border)',
+    paddingTop: '24px',
+  };
+
+  const inputStyle: React.CSSProperties = {
+    width: '100%',
+    background: 'transparent',
+    borderBottom: '1px solid var(--border)',
+    padding: '8px 0',
+    fontSize: '13px',
+    color: 'var(--text)',
+    fontFamily: 'monospace',
+    outline: 'none',
+  };
+
+  const iconStyle: React.CSSProperties = {
+    color: 'var(--gold)',
+  };
+
   return (
-    <div className="flex flex-col h-full bg-zinc-950 text-zinc-100 overflow-hidden">
-      <div className="px-8 pt-12 pb-4 max-w-3xl mx-auto w-full">
-        <h1 className="text-4xl font-serif font-light tracking-tight text-zinc-100 mb-2">Settings</h1>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      <div style={{ padding: '48px 32px 16px', maxWidth: '768px', width: '100%', margin: '0 auto' }}>
+        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+          ryan@bujo.vault $ config
+        </div>
+        <h1 style={{ fontSize: '28px', fontWeight: 300, letterSpacing: '-0.02em', color: 'var(--text)', margin: '4px 0 2px' }}>
+          settings
+        </h1>
+        <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+          // configuration
+        </p>
       </div>
 
-      <div className="flex-1 overflow-y-auto scrollbar-hide px-8 py-4 max-w-3xl mx-auto w-full space-y-8">
+      <div className="scrollbar-hide" style={{ flex: 1, overflowY: 'auto', padding: '16px 32px', maxWidth: '768px', width: '100%', margin: '0 auto' }}>
 
-        <section className="space-y-4">
-          <h2 className="text-xl font-medium text-zinc-100 flex items-center gap-2">
-            <Key size={20} className="text-indigo-400" />
-            AI Configuration
+        <section style={sectionStyle}>
+          <h2 style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+            <Key size={16} style={iconStyle} />
+            ai configuration
           </h2>
-          <div className="p-6 bg-zinc-900/30 rounded-2xl space-y-4">
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs text-zinc-500 block mb-1">OpenRouter API Key</label>
-                <input
-                  type="password"
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="sk-or-v1-..."
-                  className="w-full bg-zinc-950/50 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-zinc-700 transition-colors font-mono"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-zinc-500 block mb-1">Model</label>
-                <input
-                  type="text"
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  placeholder="openai/gpt-4o-2024-11-20"
-                  className="w-full bg-zinc-950/50 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-zinc-700 transition-colors font-mono"
-                />
-              </div>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={handleSaveConfig}
-                  disabled={status === 'saving'}
-                  className="flex items-center gap-2 px-4 py-2 bg-indigo-500/20 text-indigo-300 rounded-lg hover:bg-indigo-500/30 transition-colors text-sm font-medium disabled:opacity-50"
-                >
-                  {status === 'saving' ? 'Saving...' :
-                   status === 'saved' ? <><CheckCircle size={14} className="text-emerald-400" /> Saved</> :
-                   status === 'error' ? <><XCircle size={14} className="text-red-400" /> Failed</> :
-                   'Save'}
-                </button>
-                {status === 'error' && <span className="text-xs text-red-400">{errorMsg}</span>}
-              </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div>
+              <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>provider</label>
+              <select
+                value={provider}
+                onChange={(e) => {
+                  const next = e.target.value as 'minimax' | 'openrouter';
+                  setProvider(next);
+                  setModel(next === 'minimax' ? 'MiniMax-M3' : 'minimax/minimax-m2.7');
+                }}
+                style={inputStyle}
+              >
+                <option value="minimax">MiniMax direct</option>
+                <option value="openrouter">OpenRouter</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>{provider === 'minimax' ? 'minimax api key' : 'openrouter api key'}</label>
+              <input
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder={apiKey.includes('…') ? 'existing key saved — enter a new key to replace' : provider === 'minimax' ? 'MINIMAX_API_KEY or paste token plan key' : 'sk-or-v1-...'}
+                style={inputStyle}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>model</label>
+              <input
+                type="text"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                placeholder={provider === 'minimax' ? 'MiniMax-M3' : 'minimax/minimax-m2.7'}
+                style={inputStyle}
+              />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <button
+                onClick={handleSaveConfig}
+                disabled={status === 'saving'}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: status === 'saved' ? 'var(--green)' : status === 'error' ? 'var(--red)' : 'var(--gold)',
+                  cursor: status === 'saving' ? 'wait' : 'pointer',
+                  fontSize: '13px',
+                  fontFamily: 'monospace',
+                  padding: '4px 0',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                {status === 'saving' ? '[saving...]' :
+                 status === 'saved' ? <><CheckCircle size={14} /> [saved]</> :
+                 status === 'error' ? <><XCircle size={14} /> [failed]</> :
+                 '[save]'}
+              </button>
+              {status === 'error' && <span style={{ fontSize: '11px', color: 'var(--red)' }}>{errorMsg}</span>}
             </div>
           </div>
         </section>
 
-        <section className="space-y-4">
-          <h2 className="text-xl font-medium text-zinc-100 flex items-center gap-2">
-            <Database size={20} className="text-emerald-400" />
-            Vault Location
+        <section style={sectionStyle}>
+          <h2 style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+            <Database size={16} style={iconStyle} />
+            vault location
           </h2>
-          <div className="p-6 bg-zinc-900/30 rounded-2xl space-y-4">
-            <p className="text-sm text-zinc-400 leading-relaxed">
-              Where your journal files are stored. Set <code className="text-zinc-300 bg-zinc-800 px-1 py-0.5 rounded">BUJO_VAULT</code> env var or pick a folder below.
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <p style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+              where your journal files are stored. set <code style={{ color: 'var(--text)', background: 'var(--bg-hover)', padding: '2px 4px' }}>BUJO_VAULT</code> env var or pick a folder below.
             </p>
-            <div className="flex items-center gap-2">
-              <div className="flex-1 bg-zinc-950/50 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-zinc-400 font-mono truncate">
-                {vaultPath || 'Default: ~/bujo-vault'}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ flex: 1, fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {vaultPath || 'default: ~/bujo-vault'}
               </div>
               <button
                 onClick={handlePickVaultFolder}
-                className="flex items-center gap-2 px-4 py-3 bg-zinc-800/50 text-zinc-300 rounded-xl hover:bg-zinc-800 transition-colors text-sm font-medium"
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--gold)',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  fontFamily: 'monospace',
+                  padding: '4px 0',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
               >
-                <FolderOpen size={14} />
-                Browse
+                <FolderOpen size={14} /> [browse]
               </button>
             </div>
-            <p className="text-xs text-zinc-500">
-              Point this to an Obsidian vault or any folder. The app creates <code className="text-zinc-300 bg-zinc-800 px-1 py-0.5 rounded">daily/</code>, <code className="text-zinc-300 bg-zinc-800 px-1 py-0.5 rounded">monthly/</code>, <code className="text-zinc-300 bg-zinc-800 px-1 py-0.5 rounded">future/</code> subfolders on first run.
-            </p>
           </div>
         </section>
 
-        <section className="space-y-4">
-          <h2 className="text-xl font-medium text-zinc-100 flex items-center gap-2">
-            <Database size={20} className="text-zinc-400" />
-            Data
+        <section style={sectionStyle}>
+          <h2 style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+            <Database size={16} style={iconStyle} />
+            data
           </h2>
-          <div className="p-6 bg-zinc-900/30 rounded-2xl space-y-4">
-            <div className="flex flex-col sm:flex-row gap-3">
-              <button onClick={handleExport} className="px-4 py-2 bg-zinc-800/50 text-zinc-200 rounded-lg hover:bg-zinc-800 transition-colors text-sm font-medium flex items-center justify-center gap-2">
-                <Download size={16} /> Export Vault (Zip)
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button onClick={handleExport} style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--gold)',
+                cursor: 'pointer',
+                fontSize: '13px',
+                fontFamily: 'monospace',
+                padding: '4px 0',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}>
+                <Download size={14} /> [export]
               </button>
               {!showConfirm ? (
-                <button onClick={() => setShowConfirm(true)} className="px-4 py-2 bg-red-500/10 text-red-400 rounded-lg hover:bg-red-500/20 transition-colors text-sm font-medium">
-                  Clear All Data
+                <button onClick={() => setShowConfirm(true)} style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--red)',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  fontFamily: 'monospace',
+                  padding: '4px 0',
+                }}>
+                  [clear all data]
                 </button>
               ) : (
-                <div className="p-4 bg-red-500/10 rounded-xl space-y-3 w-full sm:w-auto">
-                  <div className="flex items-center gap-2 text-red-400 font-medium"><AlertTriangle size={18} />Are you sure?</div>
-                  <div className="flex items-center gap-3 pt-2">
-                    <button onClick={handleClearData} className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors text-sm font-medium">Delete everything</button>
-                    <button onClick={() => setShowConfirm(false)} className="px-4 py-2 bg-zinc-800/50 text-zinc-300 rounded-lg hover:bg-zinc-800 transition-colors text-sm font-medium">Cancel</button>
+                <div style={{ borderTop: '1px solid var(--red)', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--red)', fontSize: '13px' }}>
+                    <AlertTriangle size={14} /> are you sure?
+                  </div>
+                  <div style={{ display: 'flex', gap: '12px' }}>
+                    <button onClick={handleClearData} style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'var(--red)',
+                      cursor: 'pointer',
+                      fontSize: '13px',
+                      fontFamily: 'monospace',
+                      padding: '4px 0',
+                    }}>
+                      [delete everything]
+                    </button>
+                    <button onClick={() => setShowConfirm(false)} style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'var(--text-muted)',
+                      cursor: 'pointer',
+                      fontSize: '13px',
+                      fontFamily: 'monospace',
+                      padding: '4px 0',
+                    }}>
+                      [cancel]
+                    </button>
                   </div>
                 </div>
               )}
@@ -192,16 +287,18 @@ export function SettingsView() {
           </div>
         </section>
 
-        <section className="space-y-4">
-          <h2 className="text-xl font-medium text-zinc-100 flex items-center gap-2">
-            <Github size={20} className="text-zinc-400" />
-            About
+        <section style={sectionStyle}>
+          <h2 style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+            <Github size={16} style={iconStyle} />
+            about
           </h2>
-          <div className="p-6 bg-zinc-900/30 rounded-2xl">
-            <p className="text-sm text-zinc-400 leading-relaxed">
-              Based on the original CLI/TUI <a href="https://github.com/naungmon/bujo-ai" target="_blank" rel="noreferrer" className="text-indigo-400 hover:underline">bujo-ai</a> by naungmon.
-            </p>
-          </div>
+          <p style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+            based on the original cli/tui{' '}
+            <a href="https://github.com/naungmon/bujo-ai" target="_blank" rel="noreferrer" style={{ color: 'var(--gold)', textDecoration: 'none' }}>
+              bujo-ai
+            </a>{' '}
+            by naungmon.
+          </p>
         </section>
 
       </div>

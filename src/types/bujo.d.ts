@@ -17,8 +17,10 @@ export interface BuJoApi {
   appendEntry(date: string, type: string, content: string): Promise<{ success: boolean }>
   appendMonthlyEntry(monthKey: string, type: string, content: string): Promise<{ success: boolean }>
   appendFutureEntry(monthLabel: string, content: string): Promise<{ success: boolean }>
-  updateEntry(date: string, id: string, type: string, content: string): Promise<{ success: boolean; error?: string }>
-  deleteEntry(date: string, id: string): Promise<{ success: boolean; error?: string }>
+  updateEntry(date: string, id: string, type: string, content: string): Promise<{ success?: boolean; error?: string }>
+  updateMonthlyEntry(monthKey: string, id: string, type: string, content: string): Promise<{ success?: boolean; error?: string }>
+  deleteEntry(date: string, id: string): Promise<{ success?: boolean; error?: string }>
+  deleteMonthlyEntry(monthKey: string, id: string): Promise<{ success?: boolean; error?: string }>
 
   // Monthly
   getMonthly(year: number, month: number): Promise<{ date: string; entries: Array<{
@@ -29,7 +31,7 @@ export interface BuJoApi {
   getFuture(): Promise<Record<string, string[]>>
 
   // Search
-  search(query: string): Promise<Array<{
+  search(query: string, mode?: 'text' | 'semantic'): Promise<Array<{
     id: string; type: string; content: string; timestamp: number; source_date: string; display: string
   }>>
 
@@ -37,7 +39,7 @@ export interface BuJoApi {
   clearDay(date: string): Promise<{ success: boolean; error?: string }>
 
   // Undo
-  undo(): Promise<{ description: string; filePath: string; error?: string }>
+  undo(): Promise<{ description?: string; filePath?: string; filePaths?: string[]; error?: string }>
 
   // Migration
   migrateEntry(fromDate: string, toDate: string, entryId: string): Promise<{ success: boolean; error?: string }>
@@ -52,7 +54,6 @@ export interface BuJoApi {
     tasks: number; streak: number; completionRate: number
   }>
   analyticsStats(days: number): Promise<{
-    heatmap: Record<string, number>;
     period: {
       rate: number; prevRate: number; greenDays: number;
       daysTracked: number; weekdayAvg: number; weekendAvg: number;
@@ -62,6 +63,10 @@ export interface BuJoApi {
     bestStreak: number;
     currentStreak: number;
   }>
+  analyticsHeatmap(): Promise<Record<string, { count: number; rate: number }>>
+  migrateAnalyze(task: { text: string; count?: number; firstSeen?: string; lastSeen?: string } | string): Promise<{ analysis: string; source: 'llm' | 'fallback' }>
+  coachNudgeLlm(date: string): Promise<{ nudge: string; source: 'llm' | 'rule' }>
+  dailySummary(date: string): Promise<{ summary?: string; error?: string }>
   analyticsCoach(): Promise<{
     period: string; streak: number; momentum: string; completionRate: number;
     priorityAlignment: number; totalEntries: number;
@@ -84,8 +89,8 @@ export interface BuJoApi {
   futureMarkDone(text: string): Promise<{ success: boolean; error?: string }>
 
   // Config
-  configGet(): Promise<{ api_key: string; model: string; vault_path: string; theme: string }>
-  configSave(config: any): Promise<{ success: boolean }>
+  configGet(): Promise<{ has_api_key: boolean; api_key_preview: string; provider?: 'minimax' | 'openrouter'; model: string; vault_path: string; theme: string; error?: string }>
+  configSave(config: { api_key?: string; clear_api_key?: boolean; provider?: 'minimax' | 'openrouter'; model?: string; vault_path?: string; theme?: string }): Promise<{ success: boolean }>
   vaultPickFolder(): Promise<{ path: string | null }>
 
   // Templates
@@ -98,8 +103,26 @@ export interface BuJoApi {
   // Global hotkey
   globalHotkey(callback: () => void): () => void
 
+  // Habits
+  habitsList(): Promise<Array<{ id: string; name: string; frequency: 'daily' | 'weekly' | 'custom'; created: string; archived: boolean; emoji?: string }>>
+  habitsCreate(name: string, frequency: string, emoji?: string): Promise<{ id: string; name: string; frequency: string; created: string; archived: boolean; emoji?: string }>
+  habitsUpdate(id: string, updates: { name?: string; frequency?: string; emoji?: string; archived?: boolean }): Promise<{ success: boolean; error?: string }>
+  habitsDelete(id: string): Promise<{ success: boolean; error?: string }>
+  habitsToggle(id: string, date: string): Promise<{ completed: boolean }>
+  habitsStats(): Promise<Array<{
+    habit: { id: string; name: string; frequency: string; created: string; archived: boolean; emoji?: string };
+    currentStreak: number;
+    bestStreak: number;
+    rate30d: number;
+    totalCompletions: number;
+  }>>
+  habitsMatrix(startDate: string, days: number): Promise<Array<{
+    date: string;
+    completions: Record<string, boolean>;
+  }>>
+
   // Review
-  reviewPerspective(monthKey: string, perspective: string): Promise<{ content: string; cached?: boolean; error?: string }>
+  reviewPerspective(monthKey: string, perspective: string, force?: boolean): Promise<{ content: string; cached?: boolean; error?: string }>
   reviewSynthesize(monthKey: string): Promise<{ content: string; cached?: boolean; error?: string }>
   reviewList(monthKey: string): Promise<Record<string, boolean>>
   reviewGet(monthKey: string, perspective: string): Promise<{ content: string; exists: boolean }>

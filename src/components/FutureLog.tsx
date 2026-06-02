@@ -16,7 +16,7 @@ export function FutureLog() {
     const d = addMonths(new Date(), i + 1);
     return {
       key: format(d, 'yyyy-MM'),
-      label: format(d, 'MMMM yyyy'),
+      label: format(d, 'MMMM yyyy').toLowerCase(),
     };
   });
 
@@ -32,58 +32,69 @@ export function FutureLog() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-zinc-950 text-zinc-100 overflow-hidden">
-      <div className="px-8 pt-12 pb-4 max-w-3xl mx-auto w-full">
-        <h1 className="text-4xl font-serif font-light tracking-tight text-zinc-100 mb-2">
-          Future Log
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      <div style={{ padding: '48px 32px 16px', maxWidth: '768px', width: '100%', margin: '0 auto' }}>
+        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+          ryan@bujo.vault $ future
+        </div>
+        <h1 style={{ fontSize: '28px', fontWeight: 300, letterSpacing: '-0.02em', color: 'var(--text)', margin: '4px 0 2px' }}>
+          future log
         </h1>
-        <p className="text-zinc-500 font-sans">Upcoming Months</p>
+        <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+          // upcoming months
+        </p>
       </div>
 
-      <div className="flex-1 overflow-y-auto scrollbar-hide px-8 py-4 max-w-3xl mx-auto w-full">
-        <div className="flex space-x-2 mb-8 overflow-x-auto pb-2 scrollbar-hide">
+      <div className="scrollbar-hide" style={{ flex: 1, overflowY: 'auto', padding: '16px 32px', maxWidth: '768px', width: '100%', margin: '0 auto' }}>
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '24px', overflowX: 'auto', paddingBottom: '8px' }}>
           {months.map((m) => (
             <button
               key={m.key}
               onClick={() => setSelectedMonth(m.key)}
-              className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
-                selectedMonth === m.key
-                  ? 'bg-zinc-800 text-zinc-100'
-                  : 'bg-zinc-900/50 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300'
-              }`}
+              style={{
+                background: selectedMonth === m.key ? 'transparent' : 'transparent',
+                border: 'none',
+                color: selectedMonth === m.key ? 'var(--gold)' : 'var(--text-muted)',
+                cursor: 'pointer',
+                padding: '4px 0',
+                fontSize: '13px',
+                fontFamily: 'monospace',
+                whiteSpace: 'nowrap',
+              }}
             >
-              {m.label}
+              [{m.label}]
             </button>
           ))}
         </div>
 
-        <div className="space-y-1 mb-8">
-          {futureLog.entries.length === 0 ? (
-            <div className="text-zinc-600 italic py-4 text-sm">
-              No entries for {months.find(m => m.key === selectedMonth)?.label} yet.
-            </div>
-          ) : (
-            futureLog.entries.map((entry) => (
+        {futureLog.entries.length === 0 ? (
+          <div style={{ color: 'var(--text-faint)', fontStyle: 'italic', fontSize: '12px', padding: '16px 0' }}>
+            // no entries for {months.find(m => m.key === selectedMonth)?.label} yet
+          </div>
+        ) : (
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: '8px' }}>
+            {futureLog.entries.map((entry) => (
               <EntryItem
                 key={entry.id}
                 entry={entry}
                 date={futureLogKey}
                 isFocused={false}
               />
-            ))
-          )}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
-      
-      <div className="px-8 pb-8 pt-4 max-w-3xl mx-auto w-full">
-        <div className="relative flex items-center w-full transition-all bg-zinc-900/30 rounded-2xl px-4">
+
+      <div style={{ padding: '16px 32px 32px', maxWidth: '768px', width: '100%', margin: '0 auto', borderTop: '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+          <span style={{ color: 'var(--text-faint)', marginRight: '8px', fontSize: '14px' }}>&gt;</span>
           <input
             type="text"
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={`Add a task for ${months.find(m => m.key === selectedMonth)?.label}...`}
-            className="flex-1 bg-transparent border-none outline-none text-zinc-100 py-4 font-sans placeholder:text-zinc-600 text-base"
+            placeholder={`add a task for ${months.find(m => m.key === selectedMonth)?.label}...`}
+            style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'var(--text)', padding: '12px 0', fontFamily: 'inherit', fontSize: '14px' }}
           />
         </div>
       </div>

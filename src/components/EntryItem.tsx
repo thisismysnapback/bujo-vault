@@ -1,39 +1,30 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Entry, EntryType } from '../types';
-import { cn } from '../lib/utils';
-import { useVault } from '../store/VaultContext';
+import { Entry } from '../types';
+import { entrySymbol } from '../lib/entryModel';
+import { EntrySource, useVault } from '../store/VaultContext';
 
 interface EntryItemProps {
   key?: string;
   entry: Entry;
   date: string;
+  source?: EntrySource;
   isFocused: boolean;
 }
 
-const SYMBOLS: Record<EntryType, string> = {
-  task: '·',
-  done: '×',
-  migrated: '>',
-  killed: '~',
-  note: '–',
-  event: '○',
-  scheduled: '<',
-  priority: '★',
-};
+function entryStyle(entry: Entry): React.CSSProperties {
+  if (entry.kind === 'note') return { color: 'var(--text-muted)' };
+  if (entry.kind === 'event') return { color: '#7dbfa5' };
+  if (entry.status === 'done') return { color: 'var(--text-muted)', textDecoration: 'line-through' };
+  if (entry.status === 'migrated') return { color: 'var(--gold-dim)' };
+  if (entry.status === 'killed') return { color: 'var(--text-faint)', textDecoration: 'line-through' };
+  if (entry.meta?.priority) return { color: 'var(--gold-bright)', fontWeight: '600' };
+  if (entry.meta?.scheduledFor) return { color: 'var(--gold)' };
+  return { color: 'var(--text)' };
+}
 
-const STYLE: Record<EntryType, React.CSSProperties> = {
-  task: { color: 'var(--text)' },
-  done: { color: 'var(--text-muted)', textDecoration: 'line-through' },
-  migrated: { color: 'var(--gold-dim)' },
-  killed: { color: 'var(--text-faint)', textDecoration: 'line-through' },
-  note: { color: 'var(--text-muted)' },
-  event: { color: '#7dbfa5' },
-  scheduled: { color: 'var(--gold)' },
-  priority: { color: 'var(--gold-bright)', fontWeight: '600' },
-};
-
-export function EntryItem({ entry, date, isFocused }: EntryItemProps) {
-  const { updateEntry, deleteEntry } = useVault();
+export function EntryItem({ entry, date, source, isFocused }: EntryItemProps) {
+  const { updateEntrySource, deleteEntrySource } = useVault();
+  const entrySource = source ?? { kind: 'daily' as const, date };
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(entry.content);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -47,7 +38,7 @@ export function EntryItem({ entry, date, isFocused }: EntryItemProps) {
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
-      updateEntry(date, entry.id, { content: editValue });
+      updateEntrySource(entrySource, entry.id, { content: editValue });
       setIsEditing(false);
     } else if (e.key === 'Escape') {
       cancelledRef.current = true;
@@ -58,15 +49,15 @@ export function EntryItem({ entry, date, isFocused }: EntryItemProps) {
 
   const handleBlur = () => {
     if (!cancelledRef.current) {
-      updateEntry(date, entry.id, { content: editValue });
+      updateEntrySource(entrySource, entry.id, { content: editValue });
     }
     cancelledRef.current = false;
     setIsEditing(false);
   };
 
   const toggleStatus = () => {
-    if (entry.type === 'task') updateEntry(date, entry.id, { type: 'done' });
-    else if (entry.type === 'done') updateEntry(date, entry.id, { type: 'task' });
+    if (entry.kind === 'task' && entry.status === 'active') updateEntrySource(entrySource, entry.id, { type: 'done' });
+    else if (entry.kind === 'task' && entry.status === 'done') updateEntrySource(entrySource, entry.id, { type: 'task' });
   };
 
   return (
@@ -98,10 +89,10 @@ export function EntryItem({ entry, date, isFocused }: EntryItemProps) {
           flexShrink: 0,
           cursor: 'pointer',
           userSelect: 'none',
-          ...STYLE[entry.type],
+          ...entryStyle(entry),
         }}
       >
-        {SYMBOLS[entry.type]}
+        {entrySymbol(entry)}
       </span>
 
       <div style={{ flex: 1 }}>
@@ -124,16 +115,16 @@ export function EntryItem({ entry, date, isFocused }: EntryItemProps) {
             }}
           />
         ) : (
-          <span style={{ fontSize: '13px', ...STYLE[entry.type] }}>
+          <span style={{ fontSize: '13px', ...entryStyle(entry) }}>
             {entry.content}
           </span>
         )}
       </div>
 
       <div className="opacity-0 group-hover:opacity-100" style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--text-faint)', transition: 'opacity 0.1s' }}>
-        <button onClick={() => updateEntry(date, entry.id, { type: 'migrated' })} title="Migrate" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontFamily: 'inherit' }}>&gt;</button>
-        <button onClick={() => updateEntry(date, entry.id, { type: 'killed' })} title="Kill" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontFamily: 'inherit' }}>~</button>
-        <button onClick={() => deleteEntry(date, entry.id)} title="Delete" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontFamily: 'inherit' }}>×</button>
+        <button onClick={() => updateEntrySource(entrySource, entry.id, { type: 'migrated' })} title="Migrate" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontFamily: 'inherit' }}>&gt;</button>
+        <button onClick={() => updateEntrySource(entrySource, entry.id, { type: 'killed' })} title="Kill" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontFamily: 'inherit' }}>~</button>
+        <button onClick={() => deleteEntrySource(entrySource, entry.id)} title="Delete" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontFamily: 'inherit' }}>×</button>
       </div>
     </div>
   );

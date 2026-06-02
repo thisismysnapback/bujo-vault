@@ -1,12 +1,10 @@
 import { EntryType } from "../types";
-
-function isElectron(): boolean {
-  return typeof window !== 'undefined' && window.bujo !== undefined;
-}
+import { getDesktopApi } from './desktop';
 
 export async function parseDump(dumpText: string): Promise<{ type: EntryType; content: string }[]> {
-  if (isElectron()) {
-    const results = await window.bujo.smartParse(dumpText);
+  const api = getDesktopApi();
+  if (api) {
+    const results = await api.smartParse(dumpText);
     return results.map(([type, content]) => ({ type: type as EntryType, content }));
   }
 
@@ -20,17 +18,13 @@ export async function parseDump(dumpText: string): Promise<{ type: EntryType; co
     The user is using an ADHD-friendly bullet journal. They dumped a paragraph of text.
     Break it down into individual actionable or notable items.
     
-    Assign each item one of the following types:
+    Assign each item one of the following kinds:
     - 'task': A to-do item
-    - 'done': A completed task
-    - 'migrated': A task moved to another day
-    - 'killed': A canceled or abandoned task
     - 'note': A general thought, feeling, or observation
     - 'event': A meeting, appointment, or happening
-    - 'scheduled': A task scheduled for a specific future time
-    - 'priority': A highly important task
     
-    Return ONLY a valid JSON array of objects, each with a 'type' and 'content' string. Do not include markdown formatting like \`\`\`json. Keep the content concise and actionable.
+    Do not classify completion status, migration, killed, scheduled, or priority here; those are deterministic app metadata.
+    Return ONLY a valid JSON array of objects, each with a 'kind' and 'content' string. Do not include markdown formatting like \`\`\`json. Keep the content concise and actionable.
     
     Dump: "${dumpText}"`;
 
@@ -66,7 +60,12 @@ export async function parseDump(dumpText: string): Promise<{ type: EntryType; co
     }
 
     const parsed = JSON.parse(jsonStr);
-    return parsed;
+    return parsed
+      .map((item: { kind?: EntryType; type?: EntryType; content?: string }) => ({
+        type: (item.kind || item.type || 'task') as EntryType,
+        content: item.content || '',
+      }))
+      .filter((item: { content: string }) => item.content.trim());
   } catch (err) {
     console.error("Failed to parse AI response:", err);
     return [];

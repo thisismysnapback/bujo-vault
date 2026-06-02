@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useVault } from '../store/VaultContext';
 import { EntryItem } from './EntryItem';
 import { Search } from 'lucide-react';
 import { format } from 'date-fns';
-import { DailyLog, Entry, EntryType } from '../types';
+import { DailyLog, Entry } from '../types';
 
 interface SearchResult extends Entry {
   date: string;
@@ -14,6 +14,8 @@ export function SearchView() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [mode, setMode] = useState<'text' | 'semantic'>('text');
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
     if (!query.trim()) {
@@ -28,66 +30,75 @@ export function SearchView() {
       return;
     }
 
-      const searchTimeout = setTimeout(async () => {
+    const requestId = ++requestIdRef.current;
+    const searchTimeout = setTimeout(async () => {
       setIsSearching(true);
       try {
-        const ipcResults = await searchVault(query);
-        const mapped: SearchResult[] = ipcResults.map(e => ({ ...e, date: (e as any).source_date || '' }));
-        setResults(mapped);
+        const ipcResults = await searchVault(query, mode);
+        const mapped: SearchResult[] = ipcResults
+          .map(e => ({ ...e, date: (e as any).source_date || '' }))
+          .filter(e => /^\d{4}-\d{2}-\d{2}$/.test(e.date));
+        if (requestId === requestIdRef.current) setResults(mapped);
       } catch (err) {
         console.error('Search failed:', err);
       } finally {
-        setIsSearching(false);
+        if (requestId === requestIdRef.current) setIsSearching(false);
       }
     }, 300);
 
     return () => clearTimeout(searchTimeout);
-  }, [query, logs, searchVault]);
+  }, [query, mode, logs, searchVault]);
+
+  const grouped = results.reduce((acc, curr) => {
+    if (!acc[curr.date]) acc[curr.date] = [];
+    acc[curr.date].push(curr);
+    return acc;
+  }, {} as Record<string, SearchResult[]>);
 
   return (
-    <div className="flex flex-col h-full bg-zinc-950 text-zinc-100 overflow-hidden">
-      <div className="px-8 pt-12 pb-4 max-w-3xl mx-auto w-full">
-        <h1 className="text-4xl font-serif font-light tracking-tight text-zinc-100 mb-6">
-          Search
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      <div style={{ padding: '48px 32px 16px', maxWidth: '768px', width: '100%', margin: '0 auto' }}>
+        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+          ryan@bujo.vault $ search
+        </div>
+        <h1 style={{ fontSize: '28px', fontWeight: 300, letterSpacing: '-0.02em', color: 'var(--text)', margin: '4px 0 16px' }}>
+          search
         </h1>
-        <div className="relative flex items-center w-full bg-zinc-900/30 rounded-2xl overflow-hidden transition-all">
-          <div className="pl-4 pr-2 text-zinc-500">
-            <Search size={18} />
-          </div>
+        <div style={{ display: 'flex', alignItems: 'center', width: '100%', borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
+          <span style={{ color: 'var(--text-faint)', marginRight: '8px' }}><Search size={16} /></span>
+          <span style={{ color: 'var(--text-faint)', marginRight: '8px', fontSize: '14px' }}>&gt;</span>
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search vault..."
-            className="flex-1 bg-transparent border-none outline-none text-zinc-100 py-4 px-2 font-sans placeholder:text-zinc-600 text-base"
+            placeholder="search vault..."
+            style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'var(--text)', padding: '8px 0', fontFamily: 'inherit', fontSize: '14px' }}
           />
+          <div style={{ display: 'flex', gap: '4px', marginLeft: '12px' }}>
+            <button onClick={() => setMode('text')} style={{ background: 'transparent', border: 'none', color: mode === 'text' ? 'var(--gold)' : 'var(--text-faint)', fontFamily: 'monospace', cursor: 'pointer' }}>[text]</button>
+            <button onClick={() => setMode('semantic')} style={{ background: 'transparent', border: 'none', color: mode === 'semantic' ? 'var(--gold)' : 'var(--text-faint)', fontFamily: 'monospace', cursor: 'pointer' }}>[ai]</button>
+          </div>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto scrollbar-hide px-8 py-4 max-w-3xl mx-auto w-full">
+      <div className="scrollbar-hide" style={{ flex: 1, overflowY: 'auto', padding: '16px 32px', maxWidth: '768px', width: '100%', margin: '0 auto' }}>
         {query.trim() === '' ? (
-          <div className="text-zinc-600 italic py-4 text-sm text-center">
-            Type to search across all entries.
+          <div style={{ color: 'var(--text-faint)', fontStyle: 'italic', fontSize: '12px', padding: '16px 0', textAlign: 'center' }}>
+            // type to search across all entries
           </div>
         ) : isSearching ? (
-          <div className="text-zinc-600 italic py-4 text-sm text-center">
-            Searching...
+          <div style={{ color: 'var(--text-faint)', fontStyle: 'italic', fontSize: '12px', padding: '16px 0', textAlign: 'center' }}>
+            // searching...
           </div>
         ) : results.length === 0 ? (
-          <div className="text-zinc-600 italic py-4 text-sm text-center">
-            No results found for "{query}".
+          <div style={{ color: 'var(--text-faint)', fontStyle: 'italic', fontSize: '12px', padding: '16px 0', textAlign: 'center' }}>
+            // no results for "{query}"
           </div>
         ) : (
-          <div className="space-y-8">
-            {(Object.entries(
-              results.reduce((acc, curr) => {
-                if (!acc[curr.date]) acc[curr.date] = [];
-                acc[curr.date].push(curr);
-                return acc;
-              }, {} as Record<string, SearchResult[]>)
-            ) as [string, SearchResult[]][]).map(([date, entries]) => (
-              <div key={date} className="space-y-2">
-                <h3 className="text-sm font-medium text-zinc-500 pb-1 mb-2">
+          <div>
+            {(Object.entries(grouped) as [string, SearchResult[]][]).map(([date, entries]) => (
+              <div key={date} style={{ marginBottom: '24px' }}>
+                <h3 style={{ fontSize: '12px', color: 'var(--text-muted)', paddingBottom: '8px', marginBottom: '8px', borderTop: '1px solid var(--border)' }}>
                   {format(new Date(date + 'T12:00:00'), 'MMM do, yyyy')}
                 </h3>
                 {entries.map((entry) => (
@@ -95,6 +106,7 @@ export function SearchView() {
                     key={entry.id}
                     entry={entry}
                     date={date}
+                    source={{ kind: 'daily', date }}
                     isFocused={false}
                   />
                 ))}

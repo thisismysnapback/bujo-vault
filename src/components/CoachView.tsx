@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { getCoachData } from '../services/desktop';
 
 interface CoachData {
   period: string; streak: number; momentum: string; completionRate: number;
@@ -20,18 +21,17 @@ export function CoachView({ onClose }: CoachViewProps) {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (window.bujo) {
-      window.bujo.analyticsCoach().then(d => {
+    getCoachData().then(d => {
+      if (d) {
         setData(d);
-        setLoading(false);
-      }).catch((err) => {
-        setError(err.message || 'Failed to load');
-        setLoading(false);
-      });
-    } else {
-      setError('IPC not available');
+      } else {
+        setError('IPC not available');
+      }
       setLoading(false);
-    }
+    }).catch((err) => {
+      setError(err.message || 'Failed to load');
+      setLoading(false);
+    });
   }, []);
 
   useEffect(() => {
@@ -42,128 +42,136 @@ export function CoachView({ onClose }: CoachViewProps) {
     return () => window.removeEventListener('keydown', handleKey);
   }, [onClose]);
 
+  const momentumColor = {
+    building: '#4caf50',
+    steady: 'var(--gold)',
+    stalling: 'var(--gold-dim)',
+    stalled: 'var(--red)',
+    new: 'var(--text-faint)',
+  }[data?.momentum || ''] || 'var(--text-faint)';
+
   if (loading) return (
-    <div className="flex flex-col h-full bg-zinc-950 items-center justify-center">
-      <p className="text-zinc-500 text-sm">Analyzing...</p>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
+      <p style={{ color: 'var(--text-muted)', fontSize: '12px' }}>// analyzing...</p>
     </div>
   );
 
   if (error) return (
-    <div className="flex flex-col h-full bg-zinc-950 items-center justify-center">
-      <div className="text-center max-w-md px-8">
-        <p className="text-2xl font-serif text-zinc-300 mb-4">Not ready yet</p>
-        <p className="text-sm text-zinc-500">
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ textAlign: 'center', maxWidth: '400px', padding: '0 32px' }}>
+        <p style={{ fontSize: '20px', color: 'var(--text)', marginBottom: '12px' }}>not ready yet</p>
+        <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
           {error === 'IPC not available'
-            ? 'Open this app from the Electron window, not a browser.'
-            : 'Start capturing entries. You need at least 3 today to unlock coaching.'}
+            ? 'open this app from the electron window, not a browser.'
+            : 'start capturing entries. you need at least 3 today to unlock coaching.'}
         </p>
       </div>
     </div>
   );
 
   if (!data) return (
-    <div className="flex flex-col h-full bg-zinc-950 items-center justify-center">
-      <p className="text-zinc-500 text-sm">No data available.</p>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
+      <p style={{ color: 'var(--text-muted)', fontSize: '12px' }}>// no data available</p>
     </div>
   );
 
   if (data.empty) return (
-    <div className="flex flex-col h-full bg-zinc-950 items-center justify-center">
-      <div className="text-center max-w-md px-8">
-        <p className="text-2xl font-serif text-zinc-300 mb-4">
-          {data.totalEntries === 0 ? "Nothing captured yet today." :
-           data.totalEntries === 1 ? "One entry. Keep going." :
-           `${data.totalEntries} entries. You're warming up.`}
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ textAlign: 'center', maxWidth: '400px', padding: '0 32px' }}>
+        <p style={{ fontSize: '20px', color: 'var(--text)', marginBottom: '12px' }}>
+          {data.totalEntries === 0 ? "nothing captured yet today." :
+           data.totalEntries === 1 ? "one entry. keep going." :
+           `${data.totalEntries} entries. you're warming up.`}
         </p>
-        <p className="text-sm text-zinc-500">
-          {data.streak >= 3 ? `${data.streak} day streak. Don't break it.` :
-           data.streak === 0 ? "Start your streak today." :
-           "Capture 5+ entries to unlock coaching."}
+        <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+          {data.streak >= 3 ? `${data.streak} day streak. don't break it.` :
+           data.streak === 0 ? "start your streak today." :
+           "capture 5+ entries to unlock coaching."}
         </p>
       </div>
     </div>
   );
 
-  const momentumColor = {
-    building: 'bg-emerald-500/20 text-emerald-400',
-    steady: 'bg-blue-500/20 text-blue-400',
-    stalling: 'bg-amber-500/20 text-amber-400',
-    stalled: 'bg-red-500/20 text-red-400',
-    new: 'bg-zinc-500/20 text-zinc-400',
-  }[data.momentum] || 'bg-zinc-500/20 text-zinc-400';
-
   return (
-    <div className="flex flex-col h-full bg-zinc-950 text-zinc-100 overflow-hidden">
-      <div className="flex-1 overflow-y-auto scrollbar-hide px-8 py-8 max-w-2xl mx-auto w-full">
-        <div className="space-y-6">
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      <div style={{ padding: '48px 32px 16px', maxWidth: '640px', width: '100%', margin: '0 auto' }}>
+        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+          ryan@bujo.vault $ coach
+        </div>
+        <h1 style={{ fontSize: '28px', fontWeight: 300, letterSpacing: '-0.02em', color: 'var(--text)', margin: '4px 0 2px' }}>
+          coach
+        </h1>
+        <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+          // {data.period}
+        </p>
+      </div>
 
-          <div className="flex items-center gap-4">
-            <span className={`text-sm font-medium px-2 py-0.5 rounded ${momentumColor}`}>{data.momentum}</span>
-            <span className="text-zinc-500 text-sm">{Math.round(data.completionRate * 100)}% completion</span>
-            <span className="text-zinc-500 text-sm">{Math.round(data.priorityAlignment * 100)}% priority aligned</span>
-            {data.streak >= 3 && <span className="text-zinc-500 text-sm">{data.streak} day streak</span>}
-          </div>
+      <div className="scrollbar-hide" style={{ flex: 1, overflowY: 'auto', padding: '16px 32px', maxWidth: '640px', width: '100%', margin: '0 auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '24px' }}>
+          <span style={{ fontSize: '13px', fontWeight: 500, color: momentumColor }}>{data.momentum}</span>
+          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{Math.round(data.completionRate * 100)}% completion</span>
+          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{Math.round(data.priorityAlignment * 100)}% priority aligned</span>
+          {data.streak >= 3 && <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{data.streak}d streak</span>}
+        </div>
 
-          <div className="grid grid-cols-4 gap-4">
-            <MetricCard label="completion" value={`${Math.round(data.completionRate * 100)}%`} />
-            <MetricCard label="priority aligned" value={`${Math.round(data.priorityAlignment * 100)}%`} />
-            <MetricCard label="tasks/day" value={data.tasksPerDayAvg.toString()} />
-            <MetricCard label="productive" value={data.productiveTime.split(' ')[0]} />
-          </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
+          <MetricCard label="completion" value={`${Math.round(data.completionRate * 100)}%`} />
+          <MetricCard label="priority aligned" value={`${Math.round(data.priorityAlignment * 100)}%`} />
+          <MetricCard label="tasks/day" value={data.tasksPerDayAvg.toString()} />
+          <MetricCard label="productive" value={data.productiveTime.split(' ')[0]} />
+        </div>
 
-          {data.stuckTasks.length > 0 && (
-            <Section title="Stuck tasks (migrated 3+ times)">
-              {data.stuckTasks.map((t, i) => (
-                <div key={i} className="text-sm text-amber-400 flex items-center gap-2">
-                  <span className="text-amber-600">&gt;</span>
-                  {t.text}
-                  <span className="text-zinc-600 text-xs">({t.count}x)</span>
-                </div>
+        {data.stuckTasks.length > 0 && (
+          <Section title="stuck tasks (migrated 3+ times)">
+            {data.stuckTasks.map((t, i) => (
+              <div key={i} style={{ fontSize: '13px', color: 'var(--gold)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ color: 'var(--text-faint)' }}>&gt;</span>
+                {t.text}
+                <span style={{ color: 'var(--text-faint)', fontSize: '11px' }}>({t.count}x)</span>
+              </div>
+            ))}
+          </Section>
+        )}
+
+        {Object.keys(data.killThemes).length > 0 && (
+          <Section title="kill patterns">
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {Object.entries(data.killThemes).slice(0, 5).map(([theme, count]) => (
+                <span key={theme} style={{ fontSize: '11px', color: 'var(--red)' }}>
+                  {theme} ({count})
+                </span>
               ))}
-            </Section>
-          )}
+            </div>
+          </Section>
+        )}
 
-          {Object.keys(data.killThemes).length > 0 && (
-            <Section title="Kill patterns">
-              <div className="flex gap-2 flex-wrap">
-                {Object.entries(data.killThemes).slice(0, 5).map(([theme, count]) => (
-                  <span key={theme} className="text-xs bg-red-500/10 text-red-400 px-2 py-0.5 rounded">
-                    {theme} ({count})
-                  </span>
-                ))}
-              </div>
-            </Section>
-          )}
+        {data.eventDensity && (
+          <Section title="event density impact">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+              {(['low', 'medium', 'high'] as const).map((bucket) => {
+                const d = data.eventDensity[bucket];
+                return (
+                  <div key={bucket} style={{ fontSize: '13px' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>{bucket}:</span>{' '}
+                    <span style={{ color: 'var(--text)' }}>{Math.round(d.completionRate * 100)}%</span>
+                    <span style={{ color: 'var(--text-faint)', fontSize: '11px' }}> ({d.days}d)</span>
+                  </div>
+                );
+              })}
+            </div>
+          </Section>
+        )}
 
-          {data.eventDensity && (
-            <Section title="Event density impact">
-              <div className="grid grid-cols-3 gap-3">
-                {(['low', 'medium', 'high'] as const).map((bucket) => {
-                  const d = data.eventDensity[bucket];
-                  return (
-                    <div key={bucket} className="text-sm">
-                      <span className="text-zinc-500 capitalize">{bucket}:</span>{' '}
-                      <span className="text-zinc-300">{Math.round(d.completionRate * 100)}%</span>
-                      <span className="text-zinc-600 text-xs"> ({d.days}d)</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </Section>
-          )}
+        {data.noteHeavyDays.length > 0 && (
+          <Section title="note-heavy days">
+            <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+              {data.noteHeavyDays.join(', ')} — dumps, not daily rhythm.
+            </p>
+          </Section>
+        )}
 
-          {data.noteHeavyDays.length > 0 && (
-            <Section title="Note-heavy days">
-              <p className="text-sm text-zinc-400">
-                {data.noteHeavyDays.join(', ')} — dumps, not daily rhythm.
-              </p>
-            </Section>
-          )}
-
-          <div className="border-t border-zinc-800 pt-6">
-            <p className="text-lg font-serif text-zinc-200">{data.nudge}</p>
-          </div>
-
+        <div style={{ borderTop: '1px solid var(--border)', paddingTop: '16px', marginTop: '16px' }}>
+          <p style={{ fontSize: '14px', color: 'var(--text)' }}>// {data.nudge}</p>
         </div>
       </div>
     </div>
@@ -172,18 +180,18 @@ export function CoachView({ onClose }: CoachViewProps) {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div>
-      <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-2">{title}</h3>
-      {children}
+    <div style={{ marginBottom: '20px' }}>
+      <h3 style={{ fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>{title}</h3>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>{children}</div>
     </div>
   );
 }
 
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="bg-zinc-900/30 rounded-xl p-4">
-      <div className="text-2xl font-light text-zinc-100">{value}</div>
-      <div className="text-xs text-zinc-500">{label}</div>
+    <div style={{ borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
+      <div style={{ fontSize: '22px', fontWeight: 300, color: 'var(--text)' }}>{value}</div>
+      <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{label}</div>
     </div>
   );
 }

@@ -18,12 +18,13 @@ const SUB_TABS: Record<string, { id: ViewType; label: string; dropTarget?: strin
     { id: 'calendar', label: 'calendar' },
     { id: 'monthly', label: 'monthly', dropTarget: 'monthly' },
     { id: 'future', label: 'future', dropTarget: 'future' },
+    { id: 'habits', label: 'habits' },
     { id: 'migration', label: 'migrate' },
   ],
 };
 
 function getPrimaryTab(view: ViewType): string {
-  if (['daily', 'calendar', 'monthly', 'future', 'migration'].includes(view)) return 'daily';
+  if (['daily', 'calendar', 'monthly', 'future', 'habits', 'migration'].includes(view)) return 'daily';
   return view;
 }
 

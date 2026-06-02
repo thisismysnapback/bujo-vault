@@ -19,6 +19,10 @@
   --text-muted: #666666;
   --text-faint: #444444;
   --red: #c0392b;
+  --green: #4caf50;
+  --green-light: #7dbf6a;
+  --green: #4caf50;
+  --green-light: #7dbf6a;
 }
 
 body {

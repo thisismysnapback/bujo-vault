@@ -1,0 +1,71 @@
+import '@testing-library/jest-dom'
+import { vi } from 'vitest'
+
+vi.mock('electron', () => ({
+  ipcRenderer: {
+    invoke: vi.fn(),
+    on: vi.fn(),
+    removeAllListeners: vi.fn(),
+    removeListener: vi.fn(),
+  },
+  contextBridge: {
+    exposeInMainWorld: vi.fn(),
+  },
+}))
+
+const mockBujoApi = {
+  vaultEnsure: vi.fn(),
+  vaultInfo: vi.fn(),
+  getDay: vi.fn(),
+  getRange: vi.fn(),
+  appendEntry: vi.fn(),
+  appendMonthlyEntry: vi.fn(),
+  appendFutureEntry: vi.fn(),
+  updateEntry: vi.fn(),
+  deleteEntry: vi.fn(),
+  getMonthly: vi.fn(),
+  getFuture: vi.fn(),
+  search: vi.fn(),
+  clearDay: vi.fn(),
+  undo: vi.fn(),
+  migrateEntry: vi.fn(),
+  smartParse: vi.fn(),
+  analyticsStreak: vi.fn(),
+  analyticsWeekly: vi.fn(),
+  analyticsCoach: vi.fn(),
+  analyticsStats: vi.fn(),
+  analyticsHeatmap: vi.fn(),
+  dumpRetry: vi.fn(),
+  contextGet: vi.fn(),
+  contextSave: vi.fn(),
+  contextEvalSave: vi.fn(),
+  futureMarkDone: vi.fn(),
+  configGet: vi.fn(),
+  configSave: vi.fn(),
+  vaultPickFolder: vi.fn(),
+  templatesList: vi.fn(),
+  templatesApply: vi.fn(),
+  startListening: vi.fn(),
+  globalHotkey: vi.fn(),
+  reviewPerspective: vi.fn(),
+  reviewSynthesize: vi.fn(),
+  reviewList: vi.fn(),
+  reviewGet: vi.fn(),
+  onVaultChanged: vi.fn(),
+  migrateAnalyze: vi.fn(),
+  coachNudgeLlm: vi.fn(),
+  vaultSearch: vi.fn(),
+  dailySummary: vi.fn(),
+  habitsList: vi.fn(),
+  habitsCreate: vi.fn(),
+  habitsUpdate: vi.fn(),
+  habitsDelete: vi.fn(),
+  habitsToggle: vi.fn(),
+  habitsStats: vi.fn(),
+}
+
+Object.defineProperty(window, 'bujo', {
+  value: mockBujoApi,
+  writable: true,
+  configurable: true,
+})

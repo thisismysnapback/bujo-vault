@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useVault } from '../store/VaultContext';
 import { EntryType } from '../types';
 import { parseDump } from '../services/ai';
-import { Sparkles, Loader2, Command, RotateCcw } from 'lucide-react';
+import { retryDump } from '../services/desktop';
+import { Sparkles, Loader2, RotateCcw } from 'lucide-react';
 
 interface InputBarProps {
   date: string;
@@ -38,17 +39,6 @@ export function InputBar({ date }: InputBarProps) {
     inputRef.current?.focus();
   }, []);
 
-  useEffect(() => {
-    const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        inputRef.current?.focus();
-      }
-    };
-    window.addEventListener('keydown', handleGlobalKeyDown);
-    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, []);
-
   const handleDump = async (text: string) => {
     setIsProcessing(true);
     setError('');
@@ -69,11 +59,11 @@ export function InputBar({ date }: InputBarProps) {
   };
 
   const handleRetry = async () => {
-    if (!window.bujo) return;
     setIsProcessing(true);
     setError('');
     try {
-      const result = await window.bujo.dumpRetry();
+      const result = await retryDump();
+      if (!result) return;
       if (result.error) {
         setError(result.error);
       } else if (result.message) {

@@ -11,20 +11,34 @@ import { MigrationView } from './components/MigrationView';
 import { CoachView } from './components/CoachView';
 import { HelpOverlay } from './components/HelpOverlay';
 import { CalendarView } from './components/CalendarView';
+import { HabitView } from './components/HabitView';
+import { CommandPalette } from './components/CommandPalette';
+import { getTodayDateString } from './lib/utils';
 
 function MainContent() {
-  const { currentView } = useVault();
+  const { currentView, setCurrentView, logs, addEntry, clearDay, undo } = useVault();
   const [showHelp, setShowHelp] = useState(false);
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const today = getTodayDateString();
+  const hasEntriesToday = (logs[today]?.entries.length ?? 0) > 0;
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setShowCommandPalette(prev => !prev);
+        return;
+      }
       if (e.key === '?' && !e.ctrlKey && !e.metaKey) {
         const tag = (e.target as HTMLElement).tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA') return;
         e.preventDefault();
         setShowHelp(prev => !prev);
       }
-      if (e.key === 'Escape') setShowHelp(false);
+      if (e.key === 'Escape') {
+        setShowHelp(false);
+        setShowCommandPalette(false);
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
@@ -43,6 +57,18 @@ function MainContent() {
       {currentView === 'search' && <SearchView />}
       {currentView === 'settings' && <SettingsView />}
       {currentView === 'coach' && <CoachView onClose={() => {}} />}
+      {currentView === 'habits' && <HabitView />}
+      {showCommandPalette && (
+        <CommandPalette
+          currentView={currentView}
+          hasEntriesToday={hasEntriesToday}
+          onClose={() => setShowCommandPalette(false)}
+          onNavigate={setCurrentView}
+          onAddEntry={(type, content) => addEntry(today, type, content)}
+          onClearToday={() => clearDay(today)}
+          onUndo={undo}
+        />
+      )}
     </div>
   );
 }

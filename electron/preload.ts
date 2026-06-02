@@ -18,8 +18,12 @@ const bujoApi = {
     ipcRenderer.invoke('vault_append_future_entry', monthLabel, content),
   updateEntry: (date: string, id: string, type: string, content: string) =>
     ipcRenderer.invoke('vault_update_entry', date, id, type, content),
+  updateMonthlyEntry: (monthKey: string, id: string, type: string, content: string) =>
+    ipcRenderer.invoke('vault_update_monthly_entry', monthKey, id, type, content),
   deleteEntry: (date: string, id: string) =>
     ipcRenderer.invoke('vault_delete_entry', date, id),
+  deleteMonthlyEntry: (monthKey: string, id: string) =>
+    ipcRenderer.invoke('vault_delete_monthly_entry', monthKey, id),
 
   // Monthly
   getMonthly: (year: number, month: number) =>
@@ -29,7 +33,7 @@ const bujoApi = {
   getFuture: () => ipcRenderer.invoke('vault_get_future'),
 
   // Search
-  search: (query: string) => ipcRenderer.invoke('vault_search', query),
+  search: (query: string, mode?: 'text' | 'semantic') => ipcRenderer.invoke('vault_search', query, mode),
 
   // Clear
   clearDay: (date: string) => ipcRenderer.invoke('vault_clear_day', date),
@@ -49,6 +53,11 @@ const bujoApi = {
   analyticsWeekly: () => ipcRenderer.invoke('analytics_weekly'),
   analyticsCoach: () => ipcRenderer.invoke('analytics_coach'),
   analyticsStats: (days: number) => ipcRenderer.invoke('analytics_stats', days),
+  analyticsHeatmap: () => ipcRenderer.invoke('analytics_heatmap'),
+  migrateAnalyze: (task: { text: string; count?: number; firstSeen?: string; lastSeen?: string } | string) =>
+    ipcRenderer.invoke('migrate_analyze', task),
+  coachNudgeLlm: (date: string) => ipcRenderer.invoke('coach_nudge_llm', date),
+  dailySummary: (date: string) => ipcRenderer.invoke('daily_summary', date),
 
   // Dump retry
   dumpRetry: () => ipcRenderer.invoke('dump_retry'),
@@ -83,14 +92,27 @@ const bujoApi = {
   },
 
   // Review
-  reviewPerspective: (monthKey: string, perspective: string) =>
-    ipcRenderer.invoke('review_perspective', monthKey, perspective),
+  reviewPerspective: (monthKey: string, perspective: string, force = false) =>
+    ipcRenderer.invoke('review_perspective', monthKey, perspective, force),
   reviewSynthesize: (monthKey: string) =>
     ipcRenderer.invoke('review_synthesize', monthKey),
   reviewList: (monthKey: string) =>
     ipcRenderer.invoke('review_list', monthKey),
   reviewGet: (monthKey: string, perspective: string) =>
     ipcRenderer.invoke('review_get', monthKey, perspective),
+
+  // Habits
+  habitsList: () => ipcRenderer.invoke('habits_list'),
+  habitsCreate: (name: string, frequency: string, emoji?: string) =>
+    ipcRenderer.invoke('habits_create', name, frequency, emoji),
+  habitsUpdate: (id: string, updates: object) =>
+    ipcRenderer.invoke('habits_update', id, updates),
+  habitsDelete: (id: string) => ipcRenderer.invoke('habits_delete', id),
+  habitsToggle: (id: string, date: string) =>
+    ipcRenderer.invoke('habits_toggle', id, date),
+  habitsStats: () => ipcRenderer.invoke('habits_stats'),
+  habitsMatrix: (startDate: string, days: number) =>
+    ipcRenderer.invoke('habits_matrix', startDate, days),
 
   // Events - vault_changed
   onVaultChanged: (callback: (label: string) => void) => {

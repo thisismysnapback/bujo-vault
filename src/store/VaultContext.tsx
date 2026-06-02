@@ -1,5 +1,9 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { DailyLog, Entry, EntryType, ViewType } from '../types';
+import { entryToLegacyType, legacyTypeToEntryFields, normalizeEntry } from '../lib/entryModel';
+import { getDesktopApi } from '../services/desktop';
+
+export type EntrySource = { kind: 'daily'; date: string } | { kind: 'monthly'; monthKey: string };
 
 interface VaultContextType {
   logs: Record<string, DailyLog>;
@@ -8,31 +12,34 @@ interface VaultContextType {
   addEntry: (date: string, type: EntryType, content: string) => void;
   addMonthlyEntry: (monthKey: string, type: EntryType, content: string) => void;
   addFutureEntry: (monthLabel: string, content: string) => void;
-  updateEntry: (date: string, id: string, updates: Partial<Entry>) => void;
-  deleteEntry: (date: string, id: string) => void;
-  clearDay: (date: string) => void;
+  updateEntry: (date: string, id: string, updates: Partial<Entry>) => Promise<void>;
+  updateEntrySource: (source: EntrySource, id: string, updates: Partial<Entry>) => Promise<void>;
+  deleteEntry: (date: string, id: string) => Promise<void>;
+  deleteEntrySource: (source: EntrySource, id: string) => Promise<void>;
+  clearDay: (date: string) => Promise<void>;
   addMultipleEntries: (date: string, entries: { type: EntryType; content: string }[]) => void;
-  migrateEntry: (entryId: string, fromDate: string, toDate: string) => void;
-  undo: () => void;
+  migrateEntry: (entryId: string, fromDate: string, toDate: string) => Promise<void>;
+  undo: () => Promise<void>;
   loadMonthly: (year: number, month: number) => void;
   loadFuture: () => void;
-  searchVault: (query: string) => Promise<Entry[]>;
+  searchVault: (query: string, mode?: 'text' | 'semantic') => Promise<Entry[]>;
   streak: number;
 }
 
 const VaultContext = createContext<VaultContextType | undefined>(undefined);
 
-function isElectron(): boolean {
-  return typeof window !== 'undefined' && window.bujo !== undefined;
-}
-
-function mapEntries(rawEntries: Array<{ id: string; type: string; content: string; timestamp: number }>): Entry[] {
-  return rawEntries.map(e => ({
-    id: e.id,
-    type: e.type as EntryType,
-    content: e.content,
-    timestamp: e.timestamp,
-  }));
+function mapEntries(rawEntries: Array<{
+  id: string;
+  type?: string;
+  kind?: Entry['kind'];
+  status?: Entry['status'];
+  meta?: Entry['meta'];
+  content: string;
+  timestamp: number;
+  source_date?: string;
+  display?: string;
+}>): Entry[] {
+  return rawEntries.map(e => normalizeEntry(e));
 }
 
 async function reloadAndMap(getter: () => Promise<any>, key: string, setLogs: React.Dispatch<React.SetStateAction<Record<string, DailyLog>>>) {
@@ -53,9 +60,10 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   const [streak, setStreak] = useState(0);
 
   const loadDailyLogs = useCallback(async () => {
-    if (!isElectron()) return;
+    const api = getDesktopApi();
+    if (!api) return;
     try {
-      const range = await window.bujo.getRange(30);
+      const range = await api.getRange(30);
       const newLogs: Record<string, DailyLog> = {};
       for (const day of range) {
         newLogs[day.date] = {
@@ -64,7 +72,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         };
       }
       setLogs(prev => ({ ...prev, ...newLogs }));
-      const s = await window.bujo.analyticsStreak();
+      const s = await api.analyticsStreak();
       setStreak(s);
     } catch (err) {
       console.error('Failed to load daily logs:', err);
@@ -72,11 +80,12 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (isElectron()) {
-      window.bujo.vaultEnsure().then(() => {
+    const api = getDesktopApi();
+    if (api) {
+      api.vaultEnsure().then(() => {
         return loadDailyLogs();
       }).then(() => {
-        return window.bujo.startListening();
+        return api.startListening();
       }).then(() => {
         setIsLoaded(true);
       }).catch(err => {
@@ -84,7 +93,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         setIsLoaded(true);
       });
 
-      const unsubscribe = window.bujo.onVaultChanged((label: string) => {
+      const unsubscribe = api.onVaultChanged((label: string) => {
         if (label.startsWith('day:')) {
           const date = label.slice(4);
           reloadDay(date);
@@ -100,9 +109,10 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   }, [loadDailyLogs]);
 
   const reloadDay = async (date: string) => {
-    if (!isElectron()) return;
+    const api = getDesktopApi();
+    if (!api) return;
     try {
-      const day = await window.bujo.getDay(date);
+      const day = await api.getDay(date);
       setLogs(prev => ({
         ...prev,
         [date]: {
@@ -116,15 +126,18 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   };
 
   const addEntry = async (date: string, type: EntryType, content: string) => {
-    if (isElectron()) {
-      await window.bujo.appendEntry(date, type, content);
-      await reloadAndMap(() => window.bujo.getDay(date), date, setLogs);
-      setStreak(await window.bujo.analyticsStreak());
+    const api = getDesktopApi();
+    if (api) {
+      await api.appendEntry(date, type, content);
+      await reloadAndMap(() => api.getDay(date), date, setLogs);
+      setStreak(await api.analyticsStreak());
     } else {
       setLogs((prev) => {
         const dayLog = prev[date] || { date, entries: [] };
+        const fields = legacyTypeToEntryFields(type);
         const newEntry: Entry = {
           id: crypto.randomUUID(),
+          ...fields,
           type,
           content,
           timestamp: Date.now(),
@@ -141,10 +154,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   };
 
   const addMonthlyEntry = async (monthKey: string, type: EntryType, content: string) => {
-    if (isElectron()) {
-      await window.bujo.appendMonthlyEntry(monthKey, type, content);
+    const api = getDesktopApi();
+    if (api) {
+      await api.appendMonthlyEntry(monthKey, type, content);
       await reloadAndMap(
-        () => window.bujo.getMonthly(parseInt(monthKey.slice(0, 4)), parseInt(monthKey.slice(5, 7))),
+        () => api.getMonthly(parseInt(monthKey.slice(0, 4)), parseInt(monthKey.slice(5, 7))),
         monthKey, setLogs
       );
     } else {
@@ -156,6 +170,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
             ...dayLog,
             entries: [...dayLog.entries, {
               id: crypto.randomUUID(),
+              ...legacyTypeToEntryFields(type),
               type,
               content,
               timestamp: Date.now(),
@@ -167,8 +182,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   };
 
   const addFutureEntry = async (monthLabel: string, content: string) => {
-    if (isElectron()) {
-      await window.bujo.appendFutureEntry(monthLabel, content);
+    const api = getDesktopApi();
+    if (api) {
+      await api.appendFutureEntry(monthLabel, content);
       await loadFuture();
     } else {
       const key = monthLabel + '-future';
@@ -180,6 +196,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
             ...dayLog,
             entries: [...dayLog.entries, {
               id: crypto.randomUUID(),
+              kind: 'task',
+              status: 'active',
               type: 'task' as EntryType,
               content,
               timestamp: Date.now(),
@@ -191,13 +209,16 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   };
 
   const updateEntry = async (date: string, id: string, updates: Partial<Entry>) => {
-    if (isElectron()) {
+    const api = getDesktopApi();
+    if (api) {
       const dayLog = logs[date];
       if (!dayLog) return;
       const entry = dayLog.entries.find(e => e.id === id);
       if (!entry) return;
-      await window.bujo.updateEntry(date, id, updates.type || entry.type, updates.content || entry.content);
-      await reloadAndMap(() => window.bujo.getDay(date), date, setLogs);
+      const legacyType = updates.type ? updates.type : entryToLegacyType(entry);
+      const result = await api.updateEntry(date, id, legacyType, updates.content || entry.content);
+      if (result.error) throw new Error(result.error);
+      await reloadAndMap(() => api.getDay(date), date, setLogs);
     } else {
       setLogs((prev) => {
         const dayLog = prev[date];
@@ -206,7 +227,13 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
           ...prev,
           [date]: {
             ...dayLog,
-            entries: dayLog.entries.map((e) => (e.id === id ? { ...e, ...updates } : e)),
+            entries: dayLog.entries.map((e) => {
+              if (e.id !== id) return e;
+              if (updates.type) {
+                return normalizeEntry({ ...e, ...legacyTypeToEntryFields(updates.type), ...updates });
+              }
+              return { ...e, ...updates };
+            }),
           },
         };
       });
@@ -214,9 +241,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   };
 
   const deleteEntry = async (date: string, id: string) => {
-    if (isElectron()) {
-      await window.bujo.deleteEntry(date, id);
-      await reloadAndMap(() => window.bujo.getDay(date), date, setLogs);
+    const api = getDesktopApi();
+    if (api) {
+      const result = await api.deleteEntry(date, id);
+      if (result.error) throw new Error(result.error);
+      await reloadAndMap(() => api.getDay(date), date, setLogs);
     } else {
       setLogs((prev) => {
         const dayLog = prev[date];
@@ -232,8 +261,47 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const updateEntrySource = async (source: EntrySource, id: string, updates: Partial<Entry>) => {
+    if (source.kind === 'daily') return updateEntry(source.date, id, updates);
+    const api = getDesktopApi();
+    if (api) {
+      const monthLog = logs[source.monthKey];
+      if (!monthLog) return;
+      const entry = monthLog.entries.find(e => e.id === id);
+      if (!entry) return;
+      const legacyType = updates.type ? updates.type : entryToLegacyType(entry);
+      const result = await api.updateMonthlyEntry(source.monthKey, id, legacyType, updates.content || entry.content);
+      if (result.error) throw new Error(result.error);
+      await reloadAndMap(
+        () => api.getMonthly(parseInt(source.monthKey.slice(0, 4)), parseInt(source.monthKey.slice(5, 7))),
+        source.monthKey, setLogs
+      );
+      return;
+    }
+    return updateEntry(source.monthKey, id, updates);
+  };
+
+  const deleteEntrySource = async (source: EntrySource, id: string) => {
+    if (source.kind === 'daily') return deleteEntry(source.date, id);
+    const api = getDesktopApi();
+    if (api) {
+      const result = await api.deleteMonthlyEntry(source.monthKey, id);
+      if (result.error) throw new Error(result.error);
+      await reloadAndMap(
+        () => api.getMonthly(parseInt(source.monthKey.slice(0, 4)), parseInt(source.monthKey.slice(5, 7))),
+        source.monthKey, setLogs
+      );
+      return;
+    }
+    return deleteEntry(source.monthKey, id);
+  };
+
   const clearDay = async (date: string) => {
-    if (isElectron()) await window.bujo.clearDay(date);
+    const api = getDesktopApi();
+    if (api) {
+      const result = await api.clearDay(date);
+      if (result.error) throw new Error(result.error);
+    }
     setLogs(prev => {
       const newLogs = { ...prev };
       delete newLogs[date];
@@ -248,8 +316,10 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   };
 
   const migrateEntry = async (entryId: string, fromDate: string, toDate: string) => {
-    if (isElectron()) {
-      await window.bujo.migrateEntry(fromDate, toDate, entryId);
+    const api = getDesktopApi();
+    if (api) {
+      const result = await api.migrateEntry(fromDate, toDate, entryId);
+      if (result.error) throw new Error(result.error);
       await reloadDay(fromDate);
       await reloadDay(toDate);
     } else {
@@ -263,14 +333,15 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         const entry = sourceLog.entries[entryIndex];
         const updatedSourceEntries = [...sourceLog.entries];
 
-        updatedSourceEntries[entryIndex] = { ...entry, type: 'migrated' };
+        updatedSourceEntries[entryIndex] = { ...entry, status: 'migrated', type: 'migrated' };
 
         const targetLog = prev[toDate] || { date: toDate, entries: [] };
 
         const newEntry: Entry = {
           ...entry,
           id: crypto.randomUUID(),
-          type: entry.type === 'migrated' ? 'task' : entry.type,
+          status: 'active',
+          type: 'task',
           timestamp: Date.now()
         };
 
@@ -284,22 +355,30 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   };
 
   const undo = useCallback(async () => {
-    if (isElectron()) {
-      const result = await window.bujo.undo();
+    const api = getDesktopApi();
+    if (api) {
+      const result = await api.undo();
       if (result.error) {
         console.error('Undo failed:', result.error);
         return;
       }
-      const match = result.filePath.match(/[\\/]daily[\\/](.+)\.md$/);
-      if (match) {
-        await reloadDay(match[1]);
+      const filePaths = result.filePaths ?? (result.filePath ? [result.filePath] : []);
+      for (const filePath of filePaths) {
+        const dayMatch = filePath.match(/[\\/]daily[\\/](.+)\.md$/);
+        if (dayMatch) await reloadDay(dayMatch[1]);
+        const monthMatch = filePath.match(/[\\/]monthly[\\/](.+)\.md$/);
+        if (monthMatch) {
+          const [year, month] = monthMatch[1].split('-').map(Number);
+          await loadMonthly(year, month);
+        }
       }
     }
   }, []);
 
   const loadMonthly = useCallback(async (year: number, month: number) => {
-    if (!isElectron()) return;
-    const monthData = await window.bujo.getMonthly(year, month);
+    const api = getDesktopApi();
+    if (!api) return;
+    const monthData = await api.getMonthly(year, month);
     const monthKey = `${year}-${String(month).padStart(2, '0')}`;
     setLogs(prev => ({
       ...prev,
@@ -311,8 +390,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const loadFuture = useCallback(async () => {
-    if (!isElectron()) return;
-    const futureData = await window.bujo.getFuture();
+    const api = getDesktopApi();
+    if (!api) return;
+    const futureData = await api.getFuture();
     const newLogs: Record<string, DailyLog> = {};
     for (const [monthKey, items] of Object.entries(futureData)) {
       const key = monthKey + '-future';
@@ -320,6 +400,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         date: key,
         entries: items.map(content => ({
           id: crypto.randomUUID(),
+          kind: 'task' as const,
+          status: 'active' as const,
           type: 'task' as EntryType,
           content,
           timestamp: Date.now(),
@@ -329,16 +411,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     setLogs(prev => ({ ...prev, ...newLogs }));
   }, []);
 
-  const searchVault = async (query: string): Promise<Entry[]> => {
-    if (isElectron()) {
-      const results = await window.bujo.search(query);
-      return results.map(e => ({
-        id: e.id,
-        type: e.type as EntryType,
-        content: e.content,
-        timestamp: e.timestamp,
-        source_date: e.source_date,
-      })) as any;
+  const searchVault = async (query: string, mode: 'text' | 'semantic' = 'text'): Promise<Entry[]> => {
+    const api = getDesktopApi();
+    if (api) {
+      const results = await api.search(query, mode);
+      return results.map(e => normalizeEntry(e));
     }
     return [];
   };
@@ -355,7 +432,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         addMonthlyEntry,
         addFutureEntry,
         updateEntry,
+        updateEntrySource,
         deleteEntry,
+        deleteEntrySource,
         clearDay,
         addMultipleEntries,
         migrateEntry,

@@ -25,53 +25,71 @@ export function MonthlyView() {
   const nextMonth = () => setCurrentDate(addMonths(currentDate, 1));
   const prevMonth = () => setCurrentDate(subMonths(currentDate, 1));
 
+  const navBtnStyle: React.CSSProperties = {
+    background: 'transparent',
+    border: 'none',
+    color: 'var(--text-muted)',
+    cursor: 'pointer',
+    padding: '8px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  };
+
   return (
-    <div className="flex flex-col h-full bg-zinc-950 text-zinc-100 overflow-hidden">
-      <div className="px-8 pt-12 pb-4 max-w-3xl mx-auto w-full flex items-center justify-between">
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      <div style={{ padding: '48px 32px 16px', maxWidth: '768px', width: '100%', margin: '0 auto', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
         <div>
-          <h1 className="text-4xl font-serif font-light tracking-tight text-zinc-100 mb-2">
-            {format(currentDate, 'MMMM yyyy')}
+          <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+            ryan@bujo.vault $ monthly
+          </div>
+          <h1 style={{ fontSize: '28px', fontWeight: 300, letterSpacing: '-0.02em', color: 'var(--text)', margin: '4px 0 2px' }}>
+            {format(currentDate, 'MMMM yyyy').toLowerCase()}
           </h1>
-          <p className="text-zinc-500 font-sans">Monthly Log</p>
+          <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+            // monthly log
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={prevMonth} className="p-2 hover:bg-zinc-900 rounded-full text-zinc-500 hover:text-zinc-200 transition-colors">
+        <div style={{ display: 'flex', gap: '4px' }}>
+          <button onClick={prevMonth} style={navBtnStyle}>
             <ChevronLeft size={20} />
           </button>
-          <button onClick={nextMonth} className="p-2 hover:bg-zinc-900 rounded-full text-zinc-500 hover:text-zinc-200 transition-colors">
+          <button onClick={nextMonth} style={navBtnStyle}>
             <ChevronRight size={20} />
           </button>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto scrollbar-hide px-8 py-4 max-w-3xl mx-auto w-full">
-        <div className="space-y-1 mb-8">
-          {monthLog.entries.length === 0 ? (
-            <div className="text-zinc-600 italic py-4 text-sm">
-              No entries for this month yet.
-            </div>
-          ) : (
-            monthLog.entries.map((entry) => (
+      <div className="scrollbar-hide" style={{ flex: 1, overflowY: 'auto', padding: '16px 32px', maxWidth: '768px', width: '100%', margin: '0 auto' }}>
+        {monthLog.entries.length === 0 ? (
+          <div style={{ color: 'var(--text-faint)', fontStyle: 'italic', fontSize: '12px', padding: '16px 0' }}>
+            // no entries for this month yet
+          </div>
+        ) : (
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: '8px' }}>
+            {monthLog.entries.map((entry) => (
               <EntryItem
                 key={entry.id}
                 entry={entry}
                 date={currentMonthKey}
+                source={{ kind: 'monthly', monthKey: currentMonthKey }}
                 isFocused={false}
               />
-            ))
-          )}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
-      
-      <div className="px-8 pb-8 pt-4 max-w-3xl mx-auto w-full">
-        <div className="relative flex items-center w-full transition-all bg-zinc-900/30 rounded-2xl px-4">
+
+      <div style={{ padding: '16px 32px 32px', maxWidth: '768px', width: '100%', margin: '0 auto', borderTop: '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+          <span style={{ color: 'var(--text-faint)', marginRight: '8px', fontSize: '14px' }}>&gt;</span>
           <input
             type="text"
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Add a monthly task..."
-            className="flex-1 bg-transparent border-none outline-none text-zinc-100 py-4 font-sans placeholder:text-zinc-600 text-base"
+            placeholder="add a monthly task..."
+            style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'var(--text)', padding: '12px 0', fontFamily: 'inherit', fontSize: '14px' }}
           />
         </div>
       </div>
