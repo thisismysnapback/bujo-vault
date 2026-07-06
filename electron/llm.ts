@@ -18,13 +18,14 @@ export interface StuckTask {
   lastSeen?: string
 }
 
-export function summarizeEntriesForPrompt(entries: PromptEntry[]): string {
+export function summarizeEntriesForPrompt(entries: Array<PromptEntry & { date?: string }>): string {
   return entries.map((entry, index) => {
     const meta: string[] = []
     if (entry.meta?.priority) meta.push('priority')
     if (entry.meta?.scheduledFor) meta.push(`scheduled=${entry.meta.scheduledFor}`)
     if (entry.meta?.migratedTo) meta.push(`migratedTo=${entry.meta.migratedTo}`)
-    return `${index + 1}. [id=${entry.id} kind=${entry.kind} status=${entry.status}${meta.length ? ` meta=${meta.join(',')}` : ''}] ${entry.content}`
+    const datePart = entry.date ? ` date=${entry.date}` : ''
+    return `${index + 1}. [id=${entry.id}${datePart} kind=${entry.kind} status=${entry.status}${meta.length ? ` meta=${meta.join(',')}` : ''}] ${entry.content}`
   }).join('\n')
 }
 
@@ -44,12 +45,20 @@ export function buildDailySummaryPrompt(date: string, entries: PromptEntry[]): {
   }
 }
 
-export function buildCoachNudgePrompt(date: string, entries: PromptEntry[], ruleFallback: string): { cacheKey: string; systemPrompt: string; userContent: string } {
+export function buildCoachNudgePrompt(date: string, entries: Array<PromptEntry & { date?: string }>, ruleFallback: string): { cacheKey: string; systemPrompt: string; userContent: string } {
   const latest = entries.reduce((max, entry) => Math.max(max, entry.timestamp || 0), 0)
   return {
     cacheKey: `coach-nudge:${date}:${entries.length}:${latest}`,
-    systemPrompt: 'You are a concise ADHD-aware coach inside a local bullet journal. Write one gentle nudge under 160 characters. No shame. No generic productivity slogans.',
-    userContent: `Date: ${date}\nRule-based fallback nudge: ${ruleFallback}\nEntries:\n${summarizeEntriesForPrompt(entries)}\n\nReturn only the nudge text.`,
+    systemPrompt: [
+      'You are a concise ADHD-aware coach inside a local bullet journal.',
+      'Coach from patterns and friction, not by reciting or summarizing the journal.',
+      'Interpret relative words like today, tomorrow, tonight, and yesterday from each entry date, not from the current calendar day.',
+      'Treat completed event entries such as called, delivered, handed off, spent the day working, modeled, wrote, or submitted as real progress.',
+      'Do not say zero tasks were done when the entries show concrete progress, even if the progress is stored as events rather than done tasks.',
+      'Write one grounded nudge under 180 characters. Be specific, kind, and practical.',
+      'No shame, no generic productivity slogans, no therapy disclaimers, no "based on your entries" preface.',
+    ].join(' '),
+    userContent: `Current date: ${date}\nRule-based fallback nudge: ${ruleFallback}\nRecent journal context:\n${summarizeEntriesForPrompt(entries)}\n\nIf an entry dated 2026-06-03 says "tomorrow", treat it as 2026-06-04. Return only the nudge text. Do not recap the entries.`,
   }
 }
 

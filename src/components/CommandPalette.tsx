@@ -6,6 +6,7 @@ import {
   captureContentForCommand,
   filterCommandPaletteItems,
   getCommandPalettePlaceholder,
+  parseFreeTextCapture,
   type CommandPaletteItem,
 } from '../lib/commandPalette';
 import { getTodayDateString } from '../lib/utils';
@@ -19,24 +20,6 @@ interface CommandPaletteProps {
   onClearToday: () => void;
   onUndo: () => void;
 }
-
-const backdropStyle: React.CSSProperties = {
-  position: 'fixed',
-  inset: 0,
-  background: 'rgba(0, 0, 0, 0.55)',
-  zIndex: 50,
-  display: 'flex',
-  alignItems: 'flex-start',
-  justifyContent: 'center',
-  paddingTop: '12vh',
-};
-
-const panelStyle: React.CSSProperties = {
-  width: 'min(640px, calc(100vw - 32px))',
-  background: 'var(--bg)',
-  border: '1px solid var(--border)',
-  boxShadow: '0 24px 80px rgba(0,0,0,0.45)',
-};
 
 export function CommandPalette({
   currentView,
@@ -71,7 +54,8 @@ export function CommandPalette({
   const runCommand = (command?: CommandPaletteItem) => {
     if (!command) {
       if (trimmedQuery) {
-        onAddEntry('task', trimmedQuery);
+        const capture = parseFreeTextCapture(trimmedQuery);
+        onAddEntry(capture.type, capture.content);
         onClose();
       }
       return;
@@ -123,34 +107,26 @@ export function CommandPalette({
   };
 
   return (
-    <div style={backdropStyle} onMouseDown={onClose}>
-      <div style={panelStyle} onMouseDown={(event) => event.stopPropagation()}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', borderBottom: '1px solid var(--border)', padding: '14px 16px' }}>
-          <Search size={16} style={{ color: 'var(--text-faint)' }} />
+    <div className="palette-backdrop" onMouseDown={onClose}>
+      <div className="palette-panel" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="palette-search-row">
+          <Search size={16} className="text-faint" />
           <input
             ref={inputRef}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={getCommandPalettePlaceholder(query)}
-            style={{
-              flex: 1,
-              background: 'transparent',
-              border: 'none',
-              outline: 'none',
-              color: 'var(--text)',
-              fontFamily: 'inherit',
-              fontSize: '14px',
-            }}
+            className="palette-input"
           />
-          <span style={{ color: 'var(--text-faint)', fontSize: '11px' }}>esc</span>
+          <span className="palette-shortcut">esc</span>
         </div>
 
-        <div style={{ maxHeight: '420px', overflowY: 'auto', padding: '8px' }}>
+        <div className="palette-results">
           {filtered.length === 0 ? (
             <button
               onClick={() => runCommand(undefined)}
-              style={{ width: '100%', background: 'transparent', border: 'none', color: 'var(--text-muted)', textAlign: 'left', padding: '12px', fontFamily: 'inherit', cursor: trimmedQuery ? 'pointer' : 'default' }}
+              className={`palette-empty ${trimmedQuery ? 'cursor-pointer' : 'cursor-default'}`}
             >
               {trimmedQuery ? `add task: ${trimmedQuery}` : '// no commands found'}
             </button>
@@ -162,33 +138,20 @@ export function CommandPalette({
                   key={command.id}
                   onMouseEnter={() => setSelectedIndex(index)}
                   onClick={() => runCommand(command)}
-                  style={{
-                    width: '100%',
-                    display: 'grid',
-                    gridTemplateColumns: '1fr auto',
-                    gap: '12px',
-                    alignItems: 'center',
-                    background: active ? 'rgba(212, 175, 55, 0.10)' : 'transparent',
-                    border: 'none',
-                    color: 'var(--text)',
-                    textAlign: 'left',
-                    padding: '10px 12px',
-                    fontFamily: 'inherit',
-                    cursor: 'pointer',
-                  }}
+                  className={`palette-result ${active ? 'palette-result-active' : ''}`}
                 >
                   <span>
-                    <span style={{ display: 'block', fontSize: '13px', color: active ? 'var(--gold)' : 'var(--text)' }}>{command.label}</span>
-                    <span style={{ display: 'block', fontSize: '11px', color: 'var(--text-faint)', marginTop: '2px' }}>{command.description}</span>
+                    <span className={`palette-result-label ${active ? 'palette-result-label-active' : ''}`}>{command.label}</span>
+                    <span className="palette-result-desc">{command.description}</span>
                   </span>
-                  <span style={{ fontSize: '11px', color: 'var(--text-faint)' }}>{command.shortcut ?? command.kind}</span>
+                  <span className="palette-shortcut">{command.shortcut ?? command.kind}</span>
                 </button>
               );
             })
           )}
         </div>
 
-        <div style={{ borderTop: '1px solid var(--border)', padding: '8px 12px', fontSize: '11px', color: 'var(--text-faint)', display: 'flex', gap: '16px' }}>
+        <div className="palette-footer">
           <span>↵ run</span>
           <span>↑↓ move</span>
           <span>type text + ↵ to add task</span>

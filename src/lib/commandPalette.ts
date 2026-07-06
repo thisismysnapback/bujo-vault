@@ -27,8 +27,8 @@ const NAV_ITEMS: Array<Omit<CommandPaletteItem, 'kind' | 'priority'>> = [
   { id: 'nav:future', label: 'Go to future log', description: 'Open future planning', keywords: ['future', 'plan'], shortcut: 'g f', view: 'future' },
   { id: 'nav:habits', label: 'Go to habits', description: 'Track habits and streaks', keywords: ['habit', 'habits', 'streak'], shortcut: 'g h', view: 'habits' },
   { id: 'nav:migration', label: 'Go to migration', description: 'Review pending tasks', keywords: ['migrate', 'migration', 'stuck'], shortcut: 'g r', view: 'migration' },
-  { id: 'nav:review', label: 'Go to stats', description: 'Open stats and monthly review', keywords: ['stats', 'review', 'analytics'], shortcut: 'g s', view: 'review' },
-  { id: 'nav:coach', label: 'Go to coach', description: 'Open coaching insights', keywords: ['coach', 'nudge'], shortcut: 'g o', view: 'coach' },
+  { id: 'nav:review', label: 'Go to stats', description: 'Open statistics', keywords: ['stats', 'analytics'], shortcut: 'g s', view: 'review' },
+  { id: 'nav:coach', label: 'Go to coach', description: 'Open coaching and monthly reviews', keywords: ['coach', 'nudge', 'review'], shortcut: 'g o', view: 'coach' },
   { id: 'nav:search', label: 'Go to search', description: 'Search across the vault', keywords: ['search', 'find'], shortcut: 'g /', view: 'search' },
   { id: 'nav:settings', label: 'Go to settings', description: 'Configure vault and AI provider', keywords: ['settings', 'config', 'provider'], shortcut: 'g ,', view: 'settings' },
 ];
@@ -119,6 +119,33 @@ export function captureContentForCommand(command: CommandPaletteItem, query: str
     priority: /^(?:priority|important|urgent|p)[:\s]+/i,
   };
   return trimmed.replace(prefixesByType[command.entryType ?? 'task'] ?? /^/, '').trim();
+}
+
+export function parseFreeTextCapture(query: string): { type: EntryType; content: string } {
+  const trimmed = query.trim();
+  const match = trimmed.match(/^(task|todo|t|note|thought|n|event|meeting|appointment|e|priority|important|urgent|p)[:\s]+(.+)$/i);
+  if (!match) return { type: 'task', content: trimmed };
+
+  const [, prefix, content] = match;
+  const normalizedPrefix = prefix.toLowerCase();
+  const typeByPrefix: Record<string, EntryType> = {
+    task: 'task',
+    todo: 'task',
+    t: 'task',
+    note: 'note',
+    thought: 'note',
+    n: 'note',
+    event: 'event',
+    meeting: 'event',
+    appointment: 'event',
+    e: 'event',
+    priority: 'priority',
+    important: 'priority',
+    urgent: 'priority',
+    p: 'priority',
+  };
+
+  return { type: typeByPrefix[normalizedPrefix] ?? 'task', content: content.trim() };
 }
 
 export function getCommandPalettePlaceholder(query: string): string {

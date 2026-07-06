@@ -3,17 +3,26 @@ import { Key, Database, Github, AlertTriangle, Download, Folder, CheckCircle, Fo
 import { useVault } from '../store/VaultContext';
 import { DailyLog } from '../types';
 import { entrySymbol } from '../lib/entryModel';
-import { clearDays, loadSettings, pickVaultFolder, saveSettings } from '../services/desktop';
+import { getTerminalPrompt } from '../lib/utils';
+import { clearAllData, loadSettings, pickVaultFolder, saveSettings } from '../services/desktop';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 
 export function SettingsView() {
   const { logs } = useVault();
+  type Provider = 'minimax' | 'deepseek';
+  const defaultModelForProvider = (value: Provider) => (
+    value === 'minimax' ? 'MiniMax-M3' : 'deepseek-v4-pro'
+  );
   const [showConfirm, setShowConfirm] = useState(false);
   const [vaultPath, setVaultPath] = useState('');
   const [apiKey, setApiKey] = useState('');
-  const [provider, setProvider] = useState<'minimax' | 'openrouter'>('minimax');
+  const [provider, setProvider] = useState<Provider>('minimax');
   const [model, setModel] = useState('MiniMax-M3');
+  const [terminalUsername, setTerminalUsername] = useState(getTerminalPrompt());
+  const modelOptions = provider === 'minimax'
+    ? ['MiniMax-M3']
+    : ['deepseek-v4-pro', 'deepseek-v4-flash'];
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -22,16 +31,28 @@ export function SettingsView() {
       if (!result) return;
       setVaultPath(result.vaultPath);
       setApiKey(result.config.has_api_key ? result.config.api_key_preview : '');
-      setProvider((result.config.provider === 'openrouter' ? 'openrouter' : 'minimax'));
-      setModel(result.config.model || (result.config.provider === 'openrouter' ? 'minimax/minimax-m2.7' : 'MiniMax-M3'));
+      const nextProvider: Provider = result.config.provider === 'deepseek' ? 'deepseek' : 'minimax';
+      setProvider(nextProvider);
+      setModel(result.config.model || defaultModelForProvider(nextProvider));
     }).catch(() => {});
   }, []);
 
+  const isApiKeyPlaceholder = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === 'from Windows environment' || trimmed.includes('\u2026')) return true;
+    // Keep both the proper ellipsis and the older mojibake preview so neither gets submitted as an API key.
+    return trimmed.includes('\u00e2\u20ac\u00a6');
+  };
   const handleSaveConfig = async () => {
     setStatus('saving');
     try {
-      const apiKeyToSave = apiKey.includes('…') ? '' : apiKey;
-      const result = await saveSettings({ api_key: apiKeyToSave, provider, model, vault_path: vaultPath, theme: 'dark' });
+      const result = await saveSettings({
+        ...(isApiKeyPlaceholder(apiKey) ? {} : { api_key: apiKey }),
+        provider,
+        model,
+        vault_path: vaultPath,
+        theme: 'dark',
+      });
       if (!result) {
       try {
         localStorage.setItem('bujo-api-key', apiKey);
@@ -63,8 +84,7 @@ export function SettingsView() {
   };
 
   const handleClearData = async () => {
-    const dates = Object.keys(logs);
-    if (await clearDays(dates)) window.location.reload();
+    if (await clearAllData()) window.location.reload();
   };
 
   const handleExport = async () => {
@@ -81,137 +101,124 @@ export function SettingsView() {
     saveAs(blob, 'bujo-vault.zip');
   };
 
-  const sectionStyle: React.CSSProperties = {
-    borderTop: '1px solid var(--border)',
-    paddingTop: '24px',
-  };
-
-  const inputStyle: React.CSSProperties = {
-    width: '100%',
-    background: 'transparent',
-    borderBottom: '1px solid var(--border)',
-    padding: '8px 0',
-    fontSize: '13px',
-    color: 'var(--text)',
-    fontFamily: 'monospace',
-    outline: 'none',
-  };
-
-  const iconStyle: React.CSSProperties = {
-    color: 'var(--gold)',
+  const handleTerminalUsernameChange = (value: string) => {
+    const next = value.trim() || 'user@bujo.vault';
+    setTerminalUsername(value);
+    localStorage.setItem('bujo:username', next);
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-      <div style={{ padding: '48px 32px 16px', maxWidth: '768px', width: '100%', margin: '0 auto' }}>
-        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
-          ryan@bujo.vault $ config
+    <div className="page-shell">
+      <div className="page-header">
+        <div className="page-command">
+          {getTerminalPrompt()} $ config
         </div>
-        <h1 style={{ fontSize: '28px', fontWeight: 300, letterSpacing: '-0.02em', color: 'var(--text)', margin: '4px 0 2px' }}>
+        <h1 className="page-title">
           settings
         </h1>
-        <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+        <p className="page-subtitle">
           // configuration
         </p>
       </div>
 
-      <div className="scrollbar-hide" style={{ flex: 1, overflowY: 'auto', padding: '16px 32px', maxWidth: '768px', width: '100%', margin: '0 auto' }}>
+      <div className="page-scroll">
 
-        <section style={sectionStyle}>
-          <h2 style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-            <Key size={16} style={iconStyle} />
+        <section className="settings-section">
+          <h2 className="settings-section-title">
+            <Key size={16} className="settings-icon" />
             ai configuration
           </h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div className="settings-field-group">
             <div>
-              <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>provider</label>
+              <label className="settings-label">provider</label>
               <select
                 value={provider}
                 onChange={(e) => {
-                  const next = e.target.value as 'minimax' | 'openrouter';
+                  const next = e.target.value as Provider;
                   setProvider(next);
-                  setModel(next === 'minimax' ? 'MiniMax-M3' : 'minimax/minimax-m2.7');
+                  setModel(defaultModelForProvider(next));
                 }}
-                style={inputStyle}
+                className="settings-input"
               >
                 <option value="minimax">MiniMax direct</option>
-                <option value="openrouter">OpenRouter</option>
+                <option value="deepseek">DeepSeek global</option>
               </select>
             </div>
             <div>
-              <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>{provider === 'minimax' ? 'minimax api key' : 'openrouter api key'}</label>
+              <label className="settings-label">{provider === 'minimax' ? 'minimax api key' : 'deepseek api key'}</label>
               <input
                 type="password"
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                placeholder={apiKey.includes('…') ? 'existing key saved — enter a new key to replace' : provider === 'minimax' ? 'MINIMAX_API_KEY or paste token plan key' : 'sk-or-v1-...'}
-                style={inputStyle}
+                placeholder={apiKey.includes('…') ? 'existing key saved - enter a new key to replace' : provider === 'minimax' ? 'MINIMAX_API_KEY or paste token plan key' : 'DEEPSEEK_API_KEY or sk-...'}
+                className="settings-input"
               />
             </div>
             <div>
-              <label style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>model</label>
-              <input
-                type="text"
+              <label className="settings-label">model</label>
+              <select
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
-                placeholder={provider === 'minimax' ? 'MiniMax-M3' : 'minimax/minimax-m2.7'}
-                style={inputStyle}
-              />
+                className="settings-input"
+              >
+                {modelOptions.map(option => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div className="flex items-center gap-3">
               <button
                 onClick={handleSaveConfig}
                 disabled={status === 'saving'}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: status === 'saved' ? 'var(--green)' : status === 'error' ? 'var(--red)' : 'var(--gold)',
-                  cursor: status === 'saving' ? 'wait' : 'pointer',
-                  fontSize: '13px',
-                  fontFamily: 'monospace',
-                  padding: '4px 0',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                }}
+                className={[
+                  'settings-action-btn',
+                  status === 'saving' ? 'settings-action-btn-wait' : '',
+                  status === 'saved' ? 'settings-action-btn-saved' : '',
+                  status === 'error' ? 'settings-action-btn-error' : '',
+                ].filter(Boolean).join(' ')}
               >
                 {status === 'saving' ? '[saving...]' :
                  status === 'saved' ? <><CheckCircle size={14} /> [saved]</> :
                  status === 'error' ? <><XCircle size={14} /> [failed]</> :
                  '[save]'}
               </button>
-              {status === 'error' && <span style={{ fontSize: '11px', color: 'var(--red)' }}>{errorMsg}</span>}
+              {status === 'error' && <span className="settings-error">{errorMsg}</span>}
             </div>
           </div>
         </section>
 
-        <section style={sectionStyle}>
-          <h2 style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-            <Database size={16} style={iconStyle} />
+        <section className="settings-section">
+          <h2 className="settings-section-title">
+            <Key size={16} className="settings-icon" />
+            terminal
+          </h2>
+          <div>
+            <label className="settings-label">terminal username</label>
+            <input
+              value={terminalUsername}
+              onChange={(e) => handleTerminalUsernameChange(e.target.value)}
+              placeholder="user@bujo.vault"
+              className="settings-input"
+            />
+          </div>
+        </section>
+
+        <section className="settings-section">
+          <h2 className="settings-section-title">
+            <Database size={16} className="settings-icon" />
             vault location
           </h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <p style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-              where your journal files are stored. set <code style={{ color: 'var(--text)', background: 'var(--bg-hover)', padding: '2px 4px' }}>BUJO_VAULT</code> env var or pick a folder below.
+          <div className="settings-field-group">
+            <p className="settings-about-text">
+              where your journal files are stored. set <code className="settings-code">BUJO_VAULT</code> env var or pick a folder below.
             </p>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ flex: 1, fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div className="flex items-center gap-2">
+              <div className="settings-vault-path">
                 {vaultPath || 'default: ~/bujo-vault'}
               </div>
               <button
                 onClick={handlePickVaultFolder}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'var(--gold)',
-                  cursor: 'pointer',
-                  fontSize: '13px',
-                  fontFamily: 'monospace',
-                  padding: '4px 0',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                }}
+                className="settings-action-btn"
               >
                 <FolderOpen size={14} /> [browse]
               </button>
@@ -219,65 +226,30 @@ export function SettingsView() {
           </div>
         </section>
 
-        <section style={sectionStyle}>
-          <h2 style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-            <Database size={16} style={iconStyle} />
+        <section className="settings-section">
+          <h2 className="settings-section-title">
+            <Database size={16} className="settings-icon" />
             data
           </h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <div style={{ display: 'flex', gap: '12px' }}>
-              <button onClick={handleExport} style={{
-                background: 'transparent',
-                border: 'none',
-                color: 'var(--gold)',
-                cursor: 'pointer',
-                fontSize: '13px',
-                fontFamily: 'monospace',
-                padding: '4px 0',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}>
+          <div className="settings-field-group">
+            <div className="flex gap-3">
+              <button onClick={handleExport} className="settings-action-btn">
                 <Download size={14} /> [export]
               </button>
               {!showConfirm ? (
-                <button onClick={() => setShowConfirm(true)} style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'var(--red)',
-                  cursor: 'pointer',
-                  fontSize: '13px',
-                  fontFamily: 'monospace',
-                  padding: '4px 0',
-                }}>
+                <button onClick={() => setShowConfirm(true)} className="settings-action-btn-danger">
                   [clear all data]
                 </button>
               ) : (
-                <div style={{ borderTop: '1px solid var(--red)', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--red)', fontSize: '13px' }}>
+                <div className="settings-confirm">
+                  <div className="settings-confirm-msg">
                     <AlertTriangle size={14} /> are you sure?
                   </div>
-                  <div style={{ display: 'flex', gap: '12px' }}>
-                    <button onClick={handleClearData} style={{
-                      background: 'transparent',
-                      border: 'none',
-                      color: 'var(--red)',
-                      cursor: 'pointer',
-                      fontSize: '13px',
-                      fontFamily: 'monospace',
-                      padding: '4px 0',
-                    }}>
+                  <div className="flex gap-3">
+                    <button onClick={handleClearData} className="settings-action-btn-danger">
                       [delete everything]
                     </button>
-                    <button onClick={() => setShowConfirm(false)} style={{
-                      background: 'transparent',
-                      border: 'none',
-                      color: 'var(--text-muted)',
-                      cursor: 'pointer',
-                      fontSize: '13px',
-                      fontFamily: 'monospace',
-                      padding: '4px 0',
-                    }}>
+                    <button onClick={() => setShowConfirm(false)} className="settings-action-btn-muted">
                       [cancel]
                     </button>
                   </div>
@@ -287,14 +259,14 @@ export function SettingsView() {
           </div>
         </section>
 
-        <section style={sectionStyle}>
-          <h2 style={{ fontSize: '14px', fontWeight: 500, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-            <Github size={16} style={iconStyle} />
+        <section className="settings-section">
+          <h2 className="settings-section-title">
+            <Github size={16} className="settings-icon" />
             about
           </h2>
-          <p style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+          <p className="settings-about-text">
             based on the original cli/tui{' '}
-            <a href="https://github.com/naungmon/bujo-ai" target="_blank" rel="noreferrer" style={{ color: 'var(--gold)', textDecoration: 'none' }}>
+            <a href="https://github.com/naungmon/bujo-ai" target="_blank" rel="noreferrer" className="settings-about-link">
               bujo-ai
             </a>{' '}
             by naungmon.

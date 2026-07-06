@@ -1,11 +1,4 @@
-export type EntryKind = 'task' | 'note' | 'event'
-export type EntryStatus = 'active' | 'done' | 'killed' | 'migrated'
-
-export interface EntryMeta {
-  priority?: boolean
-  scheduledFor?: string | boolean
-  migratedTo?: string
-}
+import type { EntryKind, EntryMeta, EntryStatus } from './types'
 
 export interface AnalyticsEntry {
   type?: string
@@ -177,15 +170,30 @@ export function eventHeavyDayNudge(logs: DailyLog[]): string | null {
     const events = countByType(log.entries, 'event')
     const done = countByType(log.entries, 'done')
     const pending = countByType(log.entries, 'task') + countByType(log.entries, 'priority')
-    if (events >= 3 && done === 0 && pending > 0) {
+    const progress = done + log.entries.filter(isCompletedProgressEvent).length
+    if (events >= 3 && progress === 0 && pending > 0) {
       const d = new Date(log.date + 'T12:00:00')
-      return `${events} events on ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} and zero tasks done — overcommit alert.`
+      return `${events} events on ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} and no clear progress items - possible overcommit.`
     }
   }
   return null
 }
 
+export function isCompletedProgressEvent(entry: AnalyticsEntry): boolean {
+  const normalized = normalize(entry)
+  if (normalized.kind !== 'event') return false
+  return /\b(delivered|sent|submitted|finished|completed|called|talked|spoke|handled|handed|spent|worked|made|created|modeled|wrote|recorded|edited|shipped|resolved|paid|booked)\b/i.test(entry.content)
+}
+
+export function meaningfulProgressCount(log: DailyLog): number {
+  return countByType(log.entries, 'done') + log.entries.filter(isCompletedProgressEvent).length
+}
+
 export function coachingNudge(logs7: DailyLog[], allLogs: DailyLog[], streak: number): string {
+  const recentEntries = logs7.reduce((sum, log) => sum + log.entries.length, 0)
+  const allEntries = allLogs.reduce((sum, log) => sum + log.entries.length, 0)
+  if (recentEntries === 0 && allEntries === 0) return 'No logs yet. Start with a few real entries, then coaching can use evidence.'
+
   const stuck = migrationPatterns(allLogs)
   if (stuck.length && stuck[0].count >= 4) {
     return `You've migrated "${stuck[0].text}" ${stuck[0].count} times. Kill it or do it today.`
@@ -200,10 +208,19 @@ export function coachingNudge(logs7: DailyLog[], allLogs: DailyLog[], streak: nu
   }
   const heavy = noteHeavyDays(logs7)
   if (heavy.length >= 2) {
-    return `Heavy note days: ${heavy.slice(0, 2).map(d => d.date).join(', ')} — dumps, not daily rhythm.`
+    return `Heavy note days: ${heavy.slice(0, 2).map(d => d.date).join(', ')} - lots of raw material captured.`
   }
+  const actionableEntries = logs7.reduce((sum, log) => sum + log.entries.filter(entry => normalize(entry).kind === 'task').length, 0)
+  const progressEntries = logs7.reduce((sum, log) => sum + meaningfulProgressCount(log), 0)
+  if (actionableEntries === 0 && progressEntries === 0) {
+    return 'No task patterns yet. Keep logging; coaching will use the texture that emerges.'
+  }
+  if (progressEntries > 0 && actionableEntries <= progressEntries) {
+    return `${progressEntries} concrete progress ${progressEntries === 1 ? 'item' : 'items'} logged. Count done work even when it came in as events.`
+  }
+  const priorityEntries = logs7.reduce((sum, log) => sum + log.entries.filter(entry => Boolean(normalize(entry).meta?.priority)).length, 0)
   const alignment = priorityAlignment(logs7)
-  if (alignment < 0.4) {
+  if (priorityEntries > 0 && alignment < 0.4) {
     return "You're setting priorities but not finishing them. Fewer priorities, more action."
   }
   const momentum = momentumScore(logs7)
@@ -213,17 +230,20 @@ export function coachingNudge(logs7: DailyLog[], allLogs: DailyLog[], streak: nu
   return 'No patterns yet. Keep logging.'
 }
 
-export function computeHeatmap(logs: DailyLog[]): Record<string, { count: number; rate: number }> {
-  const result: Record<string, { count: number; rate: number }> = {}
+export function computeHeatmap(logs: DailyLog[]): Record<string, { count: number; rate: number; tasks: number; notes: number; events: number }> {
+  const result: Record<string, { count: number; rate: number; tasks: number; notes: number; events: number }> = {}
   for (const log of logs) {
     const count = log.entries.length
     if (count === 0) continue
     const done = countByType(log.entries, 'done')
     const task = countByType(log.entries, 'task')
     const priority = countByType(log.entries, 'priority')
+    const scheduled = countByType(log.entries, 'scheduled')
+    const notes = countByType(log.entries, 'note')
+    const events = countByType(log.entries, 'event')
     const denominator = done + task + priority
     const rate = denominator > 0 ? done / denominator : 0
-    result[log.date] = { count, rate }
+    result[log.date] = { count, rate, tasks: task + priority + scheduled + done, notes, events }
   }
   return result
 }

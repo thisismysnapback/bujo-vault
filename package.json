@@ -6,13 +6,14 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite --port=5173 --host=localhost",
-    "build": "vite build",
+    "build": "vite build && node scripts/fix-preload-cjs.cjs dist-electron/preload.cjs",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "ai:ingest": "node scripts/bujo-ai-ingest.mjs",
     "electron:dev": "vite",
-    "electron:build": "vite build && electron-builder"
+    "electron:build": "npm run build && electron-builder"
   },
   "build": {
     "appId": "com.bujo.vault",
@@ -23,8 +24,11 @@
     "files": [
       "dist/**/*",
       "dist-electron/main.js",
-      "dist-electron/preload.js",
+      "dist-electron/preload.cjs",
       "package.json"
+    ],
+    "asarUnpack": [
+      "dist-electron/preload.cjs"
     ],
     "mac": {
       "category": "public.app-category.productivity"

@@ -30,6 +30,8 @@ const mockBujoApi = {
   undo: vi.fn(),
   migrateEntry: vi.fn(),
   smartParse: vi.fn(),
+  originalSave: vi.fn(),
+  originalGet: vi.fn(),
   analyticsStreak: vi.fn(),
   analyticsWeekly: vi.fn(),
   analyticsCoach: vi.fn(),

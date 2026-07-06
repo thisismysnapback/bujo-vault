@@ -37,6 +37,9 @@ export function TopNav() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+        const target = e.target as HTMLElement | null;
+        const tag = target?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable) return;
         e.preventDefault();
         undo();
       }
@@ -64,7 +67,7 @@ export function TopNav() {
   };
 
   return (
-    <div style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg)' }}>
+    <div className="nav-bar">
       {/* Primary tabs */}
       <div className="flex items-center justify-between px-6 pt-3">
         <div className="flex items-center gap-6">
@@ -74,18 +77,7 @@ export function TopNav() {
               <button
                 key={tab.id}
                 onClick={() => setCurrentView(tab.id)}
-                style={{
-                  color: isActive ? 'var(--gold)' : 'var(--text-muted)',
-                  paddingBottom: '8px',
-                  fontSize: '13px',
-                  fontWeight: isActive ? '500' : '400',
-                  background: 'none',
-                  border: 'none',
-                  borderBottom: isActive ? '2px solid var(--gold)' : '2px solid transparent',
-                  cursor: 'pointer',
-                  letterSpacing: '0.02em',
-                  transition: 'color 0.15s',
-                }}
+                className={`nav-primary-tab ${isActive ? 'nav-primary-tab-active' : 'nav-primary-tab-inactive'}`}
               >
                 {tab.label}
               </button>
@@ -93,7 +85,7 @@ export function TopNav() {
           })}
         </div>
         {streak > 0 && (
-          <span style={{ color: 'var(--gold)', fontSize: '12px' }}>
+          <span className="nav-streak">
             {streak}d streak
           </span>
         )}
@@ -111,18 +103,7 @@ export function TopNav() {
                 onClick={() => setCurrentView(tab.id)}
                 onDragOver={dropId ? handleDragOver : undefined}
                 onDrop={dropId ? (e) => handleDrop(e, dropId) : undefined}
-                style={{
-                  color: isActive ? 'var(--text)' : 'var(--text-faint)',
-                  fontSize: '12px',
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  letterSpacing: '0.02em',
-                  transition: 'color 0.15s',
-                  textDecoration: isActive ? 'underline' : 'none',
-                  textUnderlineOffset: '3px',
-                  textDecorationColor: 'var(--gold)',
-                }}
+                className={`nav-sub-tab ${isActive ? 'nav-sub-tab-active' : 'nav-sub-tab-inactive'}`}
               >
                 {tab.label}
               </button>
@@ -132,12 +113,7 @@ export function TopNav() {
           <div
             onDragOver={handleDragOver}
             onDrop={(e) => handleDrop(e, 'tomorrow')}
-            style={{
-              fontSize: '12px',
-              color: 'var(--text-faint)',
-              cursor: 'default',
-              letterSpacing: '0.02em',
-            }}
+            className="nav-drop-target"
           >
             → tmrw
           </div>

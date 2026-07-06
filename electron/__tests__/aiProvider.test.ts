@@ -2,10 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { buildChatCompletionRequest, callChatCompletion, resolveAiConfig } from '../aiProvider'
 
 describe('resolveAiConfig', () => {
-  it('prefers MiniMax token-plan key over OpenRouter when both are present', () => {
+  it('uses MiniMax direct when configured', () => {
     const config = resolveAiConfig({
       MINIMAX_API_KEY: 'minimax-key',
-      OPENROUTER_API_KEY: 'openrouter-key',
     })
 
     expect(config).toEqual({
@@ -21,7 +20,7 @@ describe('resolveAiConfig', () => {
       BUJO_AI_KEY: 'manual-key',
       BUJO_AI_PROVIDER: 'minimax',
       BUJO_AI_MODEL: 'MiniMax-M2.7',
-      OPENROUTER_API_KEY: 'openrouter-key',
+      DEEPSEEK_API_KEY: 'deepseek-key',
     })
 
     expect(config?.provider).toBe('minimax')
@@ -30,16 +29,20 @@ describe('resolveAiConfig', () => {
     expect(config?.model).toBe('MiniMax-M2.7')
   })
 
-  it('falls back to OpenRouter only when no MiniMax key is available', () => {
-    const config = resolveAiConfig({ OPENROUTER_API_KEY: 'openrouter-key' })
+  it('uses DeepSeek direct when configured', () => {
+    const config = resolveAiConfig({
+      BUJO_AI_PROVIDER: 'deepseek',
+      DEEPSEEK_API_KEY: 'deepseek-key',
+    })
 
     expect(config).toEqual({
-      provider: 'openrouter',
-      apiKey: 'openrouter-key',
-      baseUrl: 'https://openrouter.ai/api/v1/chat/completions',
-      model: 'minimax/minimax-m2.7',
+      provider: 'deepseek',
+      apiKey: 'deepseek-key',
+      baseUrl: 'https://api.deepseek.com/chat/completions',
+      model: 'deepseek-v4-pro',
     })
   })
+
 })
 
 describe('callChatCompletion', () => {

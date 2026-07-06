@@ -4,6 +4,7 @@ import { DailyLog, Entry } from '../types';
 import { format, addDays } from 'date-fns';
 import { ArrowRight, Check, X, Sparkles } from 'lucide-react';
 import { analyzeMigrationTask } from '../services/desktop';
+import { getTerminalPrompt } from '../lib/utils';
 
 const DAILY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -11,8 +12,10 @@ export function MigrationView() {
   const { logs, updateEntry, migrateEntry } = useVault();
 
   const pendingTasks: Array<{ date: string; entry: Entry }> = [];
+  const today = format(new Date(), 'yyyy-MM-dd');
   for (const [date, log] of Object.entries(logs) as [string, DailyLog][]) {
     if (!DAILY_KEY_RE.test(date)) continue;
+    if (date === today) continue;
     for (const entry of log.entries) {
       if (entry.kind === 'task' && entry.status === 'active') {
         pendingTasks.push({ date, entry });
@@ -69,77 +72,59 @@ export function MigrationView() {
 
   const remaining = pendingTasks.filter(t => !processed.has(t.entry.id));
 
-  const actionBtnStyle = (color: string): React.CSSProperties => ({
-    background: 'transparent',
-    border: 'none',
-    color: 'var(--text-muted)',
-    cursor: 'pointer',
-    padding: '6px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  });
-
-  const entryColor = (entry: Entry): string => {
-    if (entry.meta?.priority) return 'var(--gold-bright)';
-    if (entry.meta?.scheduledFor) return 'var(--gold)';
-    return 'var(--text)';
+  const entryColorClass = (entry: Entry): string => {
+    if (entry.meta?.priority) return 'migration-content-priority';
+    if (entry.meta?.scheduledFor) return 'migration-content-scheduled';
+    return 'migration-content-normal';
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-      <div style={{ padding: '48px 32px 16px', maxWidth: '768px', width: '100%', margin: '0 auto' }}>
-        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
-          ryan@bujo.vault $ migrate
+    <div className="page-shell">
+      <div className="page-header">
+        <div className="page-command">
+          {getTerminalPrompt()} $ migrate
         </div>
-        <h1 style={{ fontSize: '28px', fontWeight: 300, letterSpacing: '-0.02em', color: 'var(--text)', margin: '4px 0 2px' }}>
+        <h1 className="page-title">
           migration
         </h1>
-        <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+        <p className="page-subtitle">
           // {remaining.length} pending {remaining.length === 1 ? 'task' : 'tasks'} to review
         </p>
       </div>
 
-      <div className="scrollbar-hide" style={{ flex: 1, overflowY: 'auto', padding: '16px 32px', maxWidth: '768px', width: '100%', margin: '0 auto' }}>
+      <div className="page-scroll">
         {remaining.length === 0 ? (
-          <div style={{ color: 'var(--text-faint)', fontStyle: 'italic', fontSize: '12px', padding: '16px 0', textAlign: 'center' }}>
+          <div className="page-empty">
             // all caught up. no pending tasks to migrate
           </div>
         ) : (
-          <div style={{ borderTop: '1px solid var(--border)', paddingTop: '8px' }}>
+          <div className="page-entries">
             {remaining.map(({ date, entry }) => (
               <div
                 key={entry.id}
-                className="group"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                  padding: '8px 0',
-                  borderTop: '1px solid var(--border)',
-                }}
+                className="migration-row"
               >
-                <span style={{ fontSize: '11px', color: 'var(--text-faint)', width: '56px', flexShrink: 0 }}>
+                <span className="migration-date">
                   {format(new Date(date + 'T12:00:00'), 'MMM d')}
                 </span>
-                <div style={{ flex: 1 }}>
-                  <span style={{ fontSize: '13px', color: entryColor(entry) }}>
+                <div className="flex-1">
+                  <span className={`migration-content ${entryColorClass(entry)}`}>
                     {entry.content}
                   </span>
                   {actionErrors[entry.id] && (
-                    <div style={{ fontSize: '12px', color: 'var(--red)', margin: '6px 0 0' }}>// {actionErrors[entry.id]}</div>
+                    <div className="migration-error">// {actionErrors[entry.id]}</div>
                   )}
                   {(analyzing === entry.id || pendingActionIds.has(entry.id) || analysis[entry.id]) && (
-                    <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: '12px', color: 'var(--gold-dim)', margin: '6px 0 0' }}>
+                    <pre className="migration-analysis">
                       {pendingActionIds.has(entry.id) ? '// saving...' : analyzing === entry.id ? '// analyzing...' : analysis[entry.id]}
                     </pre>
                   )}
                 </div>
-                <div style={{ display: 'flex', gap: '2px', opacity: 0, transition: 'opacity 0.15s' }} className="group-hover:opacity-100">
+                <div className="migration-actions">
                   <button
                     disabled={pendingActionIds.has(entry.id)}
                     onClick={() => handleAnalyze(entry)}
-                    style={actionBtnStyle('var(--gold)')}
+                    className="migration-action-btn"
                     title="Analyze with AI"
                   >
                     <Sparkles size={14} />
@@ -147,7 +132,7 @@ export function MigrationView() {
                   <button
                     disabled={pendingActionIds.has(entry.id)}
                     onClick={() => handleDone(date, entry)}
-                    style={actionBtnStyle('#4caf50')}
+                    className="migration-action-btn"
                     title="Mark done"
                   >
                     <Check size={14} />
@@ -155,7 +140,7 @@ export function MigrationView() {
                   <button
                     disabled={pendingActionIds.has(entry.id)}
                     onClick={() => handleMigrate(date, entry)}
-                    style={actionBtnStyle('var(--gold)')}
+                    className="migration-action-btn"
                     title="Migrate to tomorrow"
                   >
                     <ArrowRight size={14} />
@@ -163,7 +148,7 @@ export function MigrationView() {
                   <button
                     disabled={pendingActionIds.has(entry.id)}
                     onClick={() => handleKill(date, entry)}
-                    style={actionBtnStyle('var(--red)')}
+                    className="migration-action-btn"
                     title="Kill"
                   >
                     <X size={14} />

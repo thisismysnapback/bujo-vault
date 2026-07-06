@@ -1,29 +1,45 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { DailyLog, Entry, EntryType, ViewType } from '../types';
 import { entryToLegacyType, legacyTypeToEntryFields, normalizeEntry } from '../lib/entryModel';
 import { getDesktopApi } from '../services/desktop';
 
-export type EntrySource = { kind: 'daily'; date: string } | { kind: 'monthly'; monthKey: string };
+export type EntrySource =
+  | { kind: 'daily'; date: string }
+  | { kind: 'monthly'; monthKey: string }
+  | { kind: 'future'; monthLabel: string };
+
+export type AutoCompletionNotice = {
+  key: string;
+  date: string;
+  task: string;
+  evidence: string;
+  daysStalled: number;
+};
 
 interface VaultContextType {
   logs: Record<string, DailyLog>;
   currentView: ViewType;
   setCurrentView: (view: ViewType) => void;
-  addEntry: (date: string, type: EntryType, content: string) => void;
-  addMonthlyEntry: (monthKey: string, type: EntryType, content: string) => void;
-  addFutureEntry: (monthLabel: string, content: string) => void;
+  navigateToDate: (date: string) => void;
+  pendingNavigateDate: string | null;
+  clearPendingNavigateDate: () => void;
+  addEntry: (date: string, type: EntryType, content: string) => Promise<void>;
+  addMonthlyEntry: (monthKey: string, type: EntryType, content: string) => Promise<void>;
+  addFutureEntry: (monthLabel: string, content: string) => Promise<void>;
   updateEntry: (date: string, id: string, updates: Partial<Entry>) => Promise<void>;
   updateEntrySource: (source: EntrySource, id: string, updates: Partial<Entry>) => Promise<void>;
   deleteEntry: (date: string, id: string) => Promise<void>;
   deleteEntrySource: (source: EntrySource, id: string) => Promise<void>;
   clearDay: (date: string) => Promise<void>;
-  addMultipleEntries: (date: string, entries: { type: EntryType; content: string }[]) => void;
+  addMultipleEntries: (date: string, entries: { type: EntryType; content: string }[]) => Promise<void>;
   migrateEntry: (entryId: string, fromDate: string, toDate: string) => Promise<void>;
   undo: () => Promise<void>;
   loadMonthly: (year: number, month: number) => void;
   loadFuture: () => void;
   searchVault: (query: string, mode?: 'text' | 'semantic') => Promise<Entry[]>;
   streak: number;
+  autoCompletions: AutoCompletionNotice[];
+  dismissAutoCompletion: (key: string) => void;
 }
 
 const VaultContext = createContext<VaultContextType | undefined>(undefined);
@@ -53,11 +69,38 @@ async function reloadAndMap(getter: () => Promise<any>, key: string, setLogs: Re
   }));
 }
 
+function makeOptimisticEntry(date: string, type: EntryType, content: string): Entry {
+  return normalizeEntry({
+    id: `optimistic:${date}:${crypto.randomUUID()}`,
+    ...legacyTypeToEntryFields(type),
+    type,
+    content,
+    timestamp: Date.now(),
+    source_date: date,
+  });
+}
+
 export function VaultProvider({ children }: { children: React.ReactNode }) {
   const [logs, setLogs] = useState<Record<string, DailyLog>>({});
   const [currentView, setCurrentView] = useState<ViewType>('daily');
+  const [pendingNavigateDate, setPendingNavigateDate] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [streak, setStreak] = useState(0);
+  const [autoCompletions, setAutoCompletions] = useState<AutoCompletionNotice[]>([]);
+  const pendingDayWritesRef = useRef(new Map<string, number>());
+
+  const markDayWriteStart = (date: string) => {
+    pendingDayWritesRef.current.set(date, (pendingDayWritesRef.current.get(date) ?? 0) + 1);
+  };
+
+  const markDayWriteDone = (date: string) => {
+    const next = (pendingDayWritesRef.current.get(date) ?? 1) - 1;
+    if (next <= 0) {
+      window.setTimeout(() => pendingDayWritesRef.current.delete(date), 250);
+    } else {
+      pendingDayWritesRef.current.set(date, next);
+    }
+  };
 
   const loadDailyLogs = useCallback(async () => {
     const api = getDesktopApi();
@@ -96,6 +139,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       const unsubscribe = api.onVaultChanged((label: string) => {
         if (label.startsWith('day:')) {
           const date = label.slice(4);
+          if (pendingDayWritesRef.current.has(date)) return;
           reloadDay(date);
         } else {
           loadDailyLogs();
@@ -107,6 +151,15 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       setIsLoaded(true);
     }
   }, [loadDailyLogs]);
+
+  const navigateToDate = useCallback((date: string) => {
+    setPendingNavigateDate(date);
+    setCurrentView('daily');
+  }, []);
+
+  const clearPendingNavigateDate = useCallback(() => {
+    setPendingNavigateDate(null);
+  }, []);
 
   const reloadDay = async (date: string) => {
     const api = getDesktopApi();
@@ -125,31 +178,80 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const recordAutoCompletions = async (matches?: Array<{ date: string; id: string; daysStalled: number; task: string; evidence: string }>) => {
+    if (!matches?.length) return;
+    const stamped = Date.now();
+    const notices = matches.map(match => ({
+      key: `${match.date}:${match.id}:${stamped}`,
+      date: match.date,
+      task: match.task,
+      evidence: match.evidence,
+      daysStalled: match.daysStalled,
+    }));
+    setAutoCompletions(prev => [...notices, ...prev].slice(0, 4));
+    for (const match of matches) {
+      await reloadDay(match.date);
+    }
+  };
+
+  const dismissAutoCompletion = useCallback((key: string) => {
+    setAutoCompletions(prev => prev.filter(item => item.key !== key));
+  }, []);
+
   const addEntry = async (date: string, type: EntryType, content: string) => {
+    const optimisticEntry = makeOptimisticEntry(date, type, content);
+    setLogs((prev) => {
+      const dayLog = prev[date] || { date, entries: [] };
+      return {
+        ...prev,
+        [date]: {
+          ...dayLog,
+          entries: [...dayLog.entries, optimisticEntry],
+        },
+      };
+    });
+
     const api = getDesktopApi();
-    if (api) {
-      await api.appendEntry(date, type, content);
-      await reloadAndMap(() => api.getDay(date), date, setLogs);
-      setStreak(await api.analyticsStreak());
-    } else {
-      setLogs((prev) => {
-        const dayLog = prev[date] || { date, entries: [] };
-        const fields = legacyTypeToEntryFields(type);
-        const newEntry: Entry = {
-          id: crypto.randomUUID(),
-          ...fields,
-          type,
-          content,
-          timestamp: Date.now(),
-        };
+    if (!api) return;
+
+    try {
+      markDayWriteStart(date);
+      const result = await api.appendEntry(date, type, content) as {
+        success?: boolean;
+        entry?: any;
+        autoCompleted?: Array<{ date: string; id: string; daysStalled: number; task: string; evidence: string }>;
+        error?: string;
+      };
+      if (result.error) throw new Error(result.error);
+      if (result.entry) {
+        const persistedEntry = mapEntries([result.entry])[0];
+        setLogs(prev => {
+          const dayLog = prev[date];
+          if (!dayLog) return prev;
+          return {
+            ...prev,
+            [date]: {
+              ...dayLog,
+              entries: dayLog.entries.map(e => e.id === optimisticEntry.id ? persistedEntry : e),
+            },
+          };
+        });
+      }
+      await recordAutoCompletions(result.autoCompleted);
+      api.analyticsStreak().then(setStreak).catch(() => {});
+    } catch (err) {
+      console.error('Failed to add entry:', err);
+      setLogs(prev => {
+        const dayLog = prev[date];
+        if (!dayLog) return prev;
         return {
           ...prev,
-          [date]: {
-            ...dayLog,
-            entries: [...dayLog.entries, newEntry],
-          },
+          [date]: { ...dayLog, entries: dayLog.entries.filter(e => e.id !== optimisticEntry.id) },
         };
       });
+      throw err;
+    } finally {
+      markDayWriteDone(date);
     }
   };
 
@@ -209,60 +311,92 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   };
 
   const updateEntry = async (date: string, id: string, updates: Partial<Entry>) => {
+    const dayLog = logs[date];
+    if (!dayLog) return;
+    const entry = dayLog.entries.find(e => e.id === id);
+    if (!entry) return;
+    const legacyType = updates.type ? updates.type : entryToLegacyType(entry);
+
+    setLogs((prev) => {
+      const currentLog = prev[date];
+      if (!currentLog) return prev;
+      return {
+        ...prev,
+        [date]: {
+          ...currentLog,
+          entries: currentLog.entries.map((e) => {
+            if (e.id !== id) return e;
+            if (updates.type) {
+              return normalizeEntry({ ...e, ...legacyTypeToEntryFields(updates.type), ...updates });
+            }
+            return { ...e, ...updates };
+          }),
+        },
+      };
+    });
+
     const api = getDesktopApi();
-    if (api) {
-      const dayLog = logs[date];
-      if (!dayLog) return;
-      const entry = dayLog.entries.find(e => e.id === id);
-      if (!entry) return;
-      const legacyType = updates.type ? updates.type : entryToLegacyType(entry);
+    if (!api) return;
+
+    markDayWriteStart(date);
+    try {
       const result = await api.updateEntry(date, id, legacyType, updates.content || entry.content);
-      if (result.error) throw new Error(result.error);
-      await reloadAndMap(() => api.getDay(date), date, setLogs);
-    } else {
-      setLogs((prev) => {
-        const dayLog = prev[date];
-        if (!dayLog) return prev;
-        return {
-          ...prev,
-          [date]: {
-            ...dayLog,
-            entries: dayLog.entries.map((e) => {
-              if (e.id !== id) return e;
-              if (updates.type) {
-                return normalizeEntry({ ...e, ...legacyTypeToEntryFields(updates.type), ...updates });
-              }
-              return { ...e, ...updates };
-            }),
-          },
-        };
-      });
+      if (result.error) {
+        await reloadAndMap(() => api.getDay(date), date, setLogs);
+        throw new Error(result.error);
+      }
+    } finally {
+      markDayWriteDone(date);
     }
   };
 
   const deleteEntry = async (date: string, id: string) => {
+    const dayLog = logs[date];
+    if (!dayLog) return;
+
+    setLogs((prev) => {
+      const currentLog = prev[date];
+      if (!currentLog) return prev;
+      return {
+        ...prev,
+        [date]: {
+          ...currentLog,
+          entries: currentLog.entries.filter((e) => e.id !== id),
+        },
+      };
+    });
+
     const api = getDesktopApi();
-    if (api) {
+    if (!api) return;
+
+    markDayWriteStart(date);
+    try {
       const result = await api.deleteEntry(date, id);
-      if (result.error) throw new Error(result.error);
-      await reloadAndMap(() => api.getDay(date), date, setLogs);
-    } else {
-      setLogs((prev) => {
-        const dayLog = prev[date];
-        if (!dayLog) return prev;
-        return {
-          ...prev,
-          [date]: {
-            ...dayLog,
-            entries: dayLog.entries.filter((e) => e.id !== id),
-          },
-        };
-      });
+      if (result.error) {
+        await reloadAndMap(() => api.getDay(date), date, setLogs);
+        throw new Error(result.error);
+      }
+    } finally {
+      markDayWriteDone(date);
     }
   };
 
   const updateEntrySource = async (source: EntrySource, id: string, updates: Partial<Entry>) => {
     if (source.kind === 'daily') return updateEntry(source.date, id, updates);
+    if (source.kind === 'future') {
+      const api = getDesktopApi();
+      const key = source.monthLabel + '-future';
+      const futureLog = logs[key];
+      const entry = futureLog?.entries.find(e => e.id === id);
+      if (!entry) return;
+      if (api?.updateFutureEntry) {
+        const legacyType = updates.type ? updates.type : entryToLegacyType(entry);
+        const result = await api.updateFutureEntry(source.monthLabel, entry.content, legacyType, updates.content || entry.content);
+        if (result.error) throw new Error(result.error);
+        await loadFuture();
+      }
+      return;
+    }
     const api = getDesktopApi();
     if (api) {
       const monthLog = logs[source.monthKey];
@@ -283,6 +417,19 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
   const deleteEntrySource = async (source: EntrySource, id: string) => {
     if (source.kind === 'daily') return deleteEntry(source.date, id);
+    if (source.kind === 'future') {
+      const api = getDesktopApi();
+      const key = source.monthLabel + '-future';
+      const futureLog = logs[key];
+      const entry = futureLog?.entries.find(e => e.id === id);
+      if (!entry) return;
+      if (api?.deleteFutureEntry) {
+        const result = await api.deleteFutureEntry(source.monthLabel, entry.content);
+        if (result.error) throw new Error(result.error);
+        await loadFuture();
+      }
+      return;
+    }
     const api = getDesktopApi();
     if (api) {
       const result = await api.deleteMonthlyEntry(source.monthKey, id);
@@ -299,8 +446,13 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   const clearDay = async (date: string) => {
     const api = getDesktopApi();
     if (api) {
-      const result = await api.clearDay(date);
-      if (result.error) throw new Error(result.error);
+      markDayWriteStart(date);
+      try {
+        const result = await api.clearDay(date);
+        if (result.error) throw new Error(result.error);
+      } finally {
+        markDayWriteDone(date);
+      }
     }
     setLogs(prev => {
       const newLogs = { ...prev };
@@ -310,6 +462,62 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   };
 
   const addMultipleEntries = async (date: string, entries: { type: EntryType; content: string }[]) => {
+    const api = getDesktopApi();
+    if (api?.appendEntriesBatch) {
+      const optimisticEntries = entries.map(entry => makeOptimisticEntry(date, entry.type, entry.content));
+      setLogs(prev => {
+        const dayLog = prev[date] || { date, entries: [] };
+        return {
+          ...prev,
+          [date]: {
+            ...dayLog,
+            entries: [...dayLog.entries, ...optimisticEntries],
+          },
+        };
+      });
+
+      try {
+        markDayWriteStart(date);
+        const result = await api.appendEntriesBatch(date, entries);
+        if (result.error) throw new Error(result.error);
+        if (result.entries) {
+          const persistedEntries = mapEntries(result.entries);
+          setLogs(prev => {
+            const dayLog = prev[date];
+            if (!dayLog) return prev;
+            return {
+              ...prev,
+              [date]: {
+                ...dayLog,
+                entries: [
+                  ...dayLog.entries.filter(e => !optimisticEntries.some(opt => opt.id === e.id)),
+                  ...persistedEntries,
+                ],
+              },
+            };
+          });
+        }
+        await recordAutoCompletions(result.autoCompleted);
+      } catch (err) {
+        console.error('Failed to add entries batch:', err);
+        setLogs(prev => {
+          const dayLog = prev[date];
+          if (!dayLog) return prev;
+          return {
+            ...prev,
+            [date]: {
+              ...dayLog,
+              entries: dayLog.entries.filter(e => !optimisticEntries.some(opt => opt.id === e.id)),
+            },
+          };
+        });
+        throw err;
+      } finally {
+        markDayWriteDone(date);
+      }
+      return;
+    }
+
     for (const entry of entries) {
       await addEntry(date, entry.type, entry.content);
     }
@@ -428,6 +636,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         logs,
         currentView,
         setCurrentView,
+        navigateToDate,
+        pendingNavigateDate,
+        clearPendingNavigateDate,
         addEntry,
         addMonthlyEntry,
         addFutureEntry,
@@ -443,6 +654,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         loadFuture,
         searchVault,
         streak,
+        autoCompletions,
+        dismissAutoCompletion,
       }}
     >
       {children}

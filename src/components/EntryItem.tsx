@@ -11,15 +11,15 @@ interface EntryItemProps {
   isFocused: boolean;
 }
 
-function entryStyle(entry: Entry): React.CSSProperties {
-  if (entry.kind === 'note') return { color: 'var(--text-muted)' };
-  if (entry.kind === 'event') return { color: '#7dbfa5' };
-  if (entry.status === 'done') return { color: 'var(--text-muted)', textDecoration: 'line-through' };
-  if (entry.status === 'migrated') return { color: 'var(--gold-dim)' };
-  if (entry.status === 'killed') return { color: 'var(--text-faint)', textDecoration: 'line-through' };
-  if (entry.meta?.priority) return { color: 'var(--gold-bright)', fontWeight: '600' };
-  if (entry.meta?.scheduledFor) return { color: 'var(--gold)' };
-  return { color: 'var(--text)' };
+function entryClass(entry: Entry): string {
+  if (entry.kind === 'note') return 'entry-note';
+  if (entry.kind === 'event') return 'entry-event';
+  if (entry.status === 'done') return 'entry-done';
+  if (entry.status === 'migrated') return 'entry-migrated';
+  if (entry.status === 'killed') return 'entry-killed';
+  if (entry.meta?.priority) return 'entry-priority';
+  if (entry.meta?.scheduledFor) return 'entry-scheduled';
+  return 'entry-normal';
 }
 
 export function EntryItem({ entry, date, source, isFocused }: EntryItemProps) {
@@ -47,6 +47,11 @@ export function EntryItem({ entry, date, source, isFocused }: EntryItemProps) {
     }
   };
 
+  const startEditing = () => {
+    setEditValue(entry.content);
+    setIsEditing(true);
+  };
+
   const handleBlur = () => {
     if (!cancelledRef.current) {
       updateEntrySource(entrySource, entry.id, { content: editValue });
@@ -67,35 +72,17 @@ export function EntryItem({ entry, date, source, isFocused }: EntryItemProps) {
         e.dataTransfer.setData('application/json', JSON.stringify({ id: entry.id, date }));
         e.dataTransfer.effectAllowed = 'move';
       }}
-      onDoubleClick={() => setIsEditing(true)}
-      className="group"
-      style={{
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: '10px',
-        padding: '4px 6px',
-        borderRadius: '3px',
-        cursor: 'grab',
-        background: isFocused ? 'var(--bg-hover)' : 'transparent',
-        transition: 'background 0.1s',
-      }}
+      onDoubleClick={startEditing}
+      className={`entry-row ${isFocused ? 'entry-row-focused' : ''}`}
     >
       <span
         onClick={toggleStatus}
-        style={{
-          width: '16px',
-          textAlign: 'center',
-          fontSize: '13px',
-          flexShrink: 0,
-          cursor: 'pointer',
-          userSelect: 'none',
-          ...entryStyle(entry),
-        }}
+        className={`entry-symbol ${entryClass(entry)}`}
       >
         {entrySymbol(entry)}
       </span>
 
-      <div style={{ flex: 1 }}>
+      <div className="entry-content">
         {isEditing ? (
           <input
             ref={inputRef}
@@ -104,27 +91,20 @@ export function EntryItem({ entry, date, source, isFocused }: EntryItemProps) {
             onChange={(e) => setEditValue(e.target.value)}
             onKeyDown={handleKeyDown}
             onBlur={handleBlur}
-            style={{
-              width: '100%',
-              background: 'transparent',
-              border: 'none',
-              outline: 'none',
-              color: 'var(--text)',
-              fontSize: '13px',
-              fontFamily: 'inherit',
-            }}
+            className="entry-edit-input"
           />
         ) : (
-          <span style={{ fontSize: '13px', ...entryStyle(entry) }}>
+          <span className={`entry-text ${entryClass(entry)}`}>
             {entry.content}
           </span>
         )}
       </div>
 
-      <div className="opacity-0 group-hover:opacity-100" style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--text-faint)', transition: 'opacity 0.1s' }}>
-        <button onClick={() => updateEntrySource(entrySource, entry.id, { type: 'migrated' })} title="Migrate" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontFamily: 'inherit' }}>&gt;</button>
-        <button onClick={() => updateEntrySource(entrySource, entry.id, { type: 'killed' })} title="Kill" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontFamily: 'inherit' }}>~</button>
-        <button onClick={() => deleteEntrySource(entrySource, entry.id)} title="Delete" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontFamily: 'inherit' }}>×</button>
+      <div className="entry-actions">
+        <button onClick={startEditing} title="Edit" className="entry-action-button">e</button>
+        <button onClick={() => updateEntrySource(entrySource, entry.id, { type: 'migrated' })} title="Migrate" className="entry-action-button">&gt;</button>
+        <button onClick={() => updateEntrySource(entrySource, entry.id, { type: 'killed' })} title="Kill" className="entry-action-button">~</button>
+        <button onClick={() => deleteEntrySource(entrySource, entry.id)} title="Delete" className="entry-action-button">×</button>
       </div>
     </div>
   );

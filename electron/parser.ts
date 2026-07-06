@@ -1,13 +1,5 @@
 import { createHash } from 'crypto'
-
-export type EntryKind = 'task' | 'note' | 'event'
-export type EntryStatus = 'active' | 'done' | 'killed' | 'migrated'
-
-export interface EntryMeta {
-  priority?: boolean
-  scheduledFor?: string | boolean
-  migratedTo?: string
-}
+import type { EntryKind, EntryMeta, EntryStatus } from './types'
 
 export interface ParsedEntry {
   id: string

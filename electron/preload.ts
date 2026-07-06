@@ -12,6 +12,8 @@ const bujoApi = {
   // Entries
   appendEntry: (date: string, type: string, content: string) =>
     ipcRenderer.invoke('vault_append_entry', date, type, content),
+  appendEntriesBatch: (date: string, entries: Array<{ type: string; content: string }>) =>
+    ipcRenderer.invoke('vault_append_entries_batch', date, entries),
   appendMonthlyEntry: (monthKey: string, type: string, content: string) =>
     ipcRenderer.invoke('vault_append_monthly_entry', monthKey, type, content),
   appendFutureEntry: (monthLabel: string, content: string) =>
@@ -31,12 +33,17 @@ const bujoApi = {
 
   // Future
   getFuture: () => ipcRenderer.invoke('vault_get_future'),
+  updateFutureEntry: (monthLabel: string, oldContent: string, type: string, content: string) =>
+    ipcRenderer.invoke('vault_update_future_entry', monthLabel, oldContent, type, content),
+  deleteFutureEntry: (monthLabel: string, content: string) =>
+    ipcRenderer.invoke('vault_delete_future_entry', monthLabel, content),
 
   // Search
   search: (query: string, mode?: 'text' | 'semantic') => ipcRenderer.invoke('vault_search', query, mode),
 
   // Clear
   clearDay: (date: string) => ipcRenderer.invoke('vault_clear_day', date),
+  clearAllData: () => ipcRenderer.invoke('vault_clear_all_data'),
 
   // Undo
   undo: () => ipcRenderer.invoke('undo_last'),
@@ -46,7 +53,9 @@ const bujoApi = {
     ipcRenderer.invoke('migrate_entry', fromDate, toDate, entryId),
 
   // Parsing
-  smartParse: (text: string) => ipcRenderer.invoke('smart_parse', text),
+  smartParse: (text: string, logDate?: string) => ipcRenderer.invoke('smart_parse', text, logDate),
+  originalSave: (date: string, text: string) => ipcRenderer.invoke('original_save', date, text),
+  originalGet: (date: string) => ipcRenderer.invoke('original_get', date),
 
   // Analytics
   analyticsStreak: () => ipcRenderer.invoke('analytics_streak'),
@@ -120,6 +129,12 @@ const bujoApi = {
     ipcRenderer.on('vault_changed', listener)
     return () => ipcRenderer.removeListener('vault_changed', listener)
   },
+
+  // Diagnostics
+  bridgeDiagnostics: () => ({
+    preload: 'dist-electron/preload.cjs',
+    loadedAt: new Date().toISOString(),
+  }),
 }
 
 contextBridge.exposeInMainWorld('bujo', bujoApi)

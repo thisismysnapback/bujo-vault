@@ -3,6 +3,7 @@ import { useVault } from '../store/VaultContext';
 import { Sparkles, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { format, subMonths, addMonths, subDays, startOfWeek, addDays } from 'date-fns';
 import { generateReview, getHeatmap, getReview, getStats, hasDesktopApi, listReviews } from '../services/desktop';
+import { getTerminalPrompt } from '../lib/utils';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -16,12 +17,24 @@ interface StatsData {
     weekendAvg: number;
   };
   dowRates: number[];
+  dowEntries: number[];
+  dowLoggedDays: number[];
+  journal: {
+    periodEntries: number;
+    entriesPerTrackedDay: number;
+    activeDays: number;
+    quietDays: number;
+    mix: { tasks: number; notes: number; events: number };
+    signals: { lowEnergy: number; stress: number; satisfaction: number; pride: number };
+    themes: Array<{ label: string; count: number }>;
+    openLoops: Array<{ text: string; date: string; kind: string }>;
+  };
   allTime: { rate: number; daysTracked: number; perfectDays: number };
   bestStreak: number;
   currentStreak: number;
 }
 
-type HeatmapData = Record<string, { count: number; rate: number }>;
+type HeatmapData = Record<string, { count: number; rate: number; tasks: number; notes: number; events: number }>;
 
 const PERIODS: { label: string; days: number }[] = [
   { label: '14d', days: 14 },
@@ -38,11 +51,11 @@ function HeatmapGrid({ heatmap }: { heatmap: HeatmapData }) {
   const today = new Date();
   const startDate = startOfWeek(subDays(today, 363), { weekStartsOn: 1 });
 
-  const weeks: { date: Date; data: { count: number; rate: number } | null }[][] = [];
+  const weeks: { date: Date; data: HeatmapData[string] | null }[][] = [];
   let current = startDate;
 
   while (current <= today) {
-    const week: { date: Date; data: { count: number; rate: number } | null }[] = [];
+    const week: { date: Date; data: HeatmapData[string] | null }[] = [];
     for (let d = 0; d < 7; d++) {
       const dateStr = format(addDays(current, d), 'yyyy-MM-dd');
       const dayDate = addDays(current, d);
@@ -62,14 +75,13 @@ function HeatmapGrid({ heatmap }: { heatmap: HeatmapData }) {
     }
   });
 
-  function cellColor(data: { count: number; rate: number } | null): string {
-    if (!data || data.count === 0) return '#222222';
-    const { rate, count } = data;
-    if (rate >= 1.0) return 'var(--green)';
-    if (rate >= 0.7) return 'var(--green-light)';
-    if (rate >= 0.4) return 'var(--gold)';
-    if (rate > 0) return 'var(--gold-dim)';
-    return 'var(--red)';
+  function cellClass(data: HeatmapData[string] | null, dayDate: Date): string {
+    if (dayDate > today) return 'heatmap-cell-future';
+    if (!data || data.count === 0) return 'heatmap-cell-empty';
+    if (data.count >= 8) return 'heatmap-cell-max';
+    if (data.count >= 5) return 'heatmap-cell-high';
+    if (data.count >= 3) return 'heatmap-cell-mid';
+    return 'heatmap-cell-low';
   }
 
   const DOW_LABELS = ['m', '', 'w', '', 'f', '', 's'];
@@ -77,11 +89,11 @@ function HeatmapGrid({ heatmap }: { heatmap: HeatmapData }) {
   return (
     <div>
       {/* Month labels */}
-      <div style={{ display: 'flex', gap: '2px', marginLeft: '20px', marginBottom: '4px' }}>
+      <div className="heatmap-months">
         {weeks.map((_, i) => {
           const label = monthLabels.find(m => m.col === i);
           return (
-            <div key={i} style={{ width: '10px', fontSize: '10px', color: 'var(--text-muted)', flexShrink: 0 }}>
+            <div key={i} className="heatmap-month-label">
               {label ? label.label : ''}
             </div>
           );
@@ -89,31 +101,25 @@ function HeatmapGrid({ heatmap }: { heatmap: HeatmapData }) {
       </div>
 
       {/* Grid rows: day of week */}
-      <div style={{ display: 'flex', gap: '4px' }}>
+      <div className="heatmap-body">
         {/* DOW labels */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', width: '14px' }}>
+        <div className="heatmap-dow-col">
           {DOW_LABELS.map((l, i) => (
-            <div key={i} style={{ height: '10px', fontSize: '9px', color: 'var(--text-muted)', lineHeight: '10px', textAlign: 'right' }}>
+            <div key={i} className="heatmap-dow-label">
               {l}
             </div>
           ))}
         </div>
 
         {/* Week columns */}
-        <div style={{ display: 'flex', gap: '2px' }}>
+        <div className="heatmap-weeks">
           {weeks.map((week, wi) => (
-            <div key={wi} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+            <div key={wi} className="heatmap-week">
               {week.map((day, di) => (
                 <div
                   key={di}
-                  title={day.data ? `${format(day.date, 'MMM d')}: ${Math.round(day.data.rate * 100)}% completion (${day.data.count} entries)` : `${format(day.date, 'MMM d')}: no entries`}
-                  style={{
-                    width: '10px',
-                    height: '10px',
-                    borderRadius: '2px',
-                    background: day.date > today ? 'transparent' : cellColor(day.data),
-                    flexShrink: 0,
-                  }}
+                  title={day.data ? `${format(day.date, 'MMM d')}: ${day.data.count} entries (${day.data.notes} notes, ${day.data.tasks} tasks, ${day.data.events} events)` : `${format(day.date, 'MMM d')}: no entries`}
+                  className={`heatmap-cell ${cellClass(day.data, day.date)}`}
                 />
               ))}
             </div>
@@ -122,18 +128,17 @@ function HeatmapGrid({ heatmap }: { heatmap: HeatmapData }) {
       </div>
 
       {/* Legend */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '6px', marginLeft: '18px' }}>
-        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>// none</span>
+      <div className="heatmap-legend">
+        <span className="heatmap-legend-text">// none</span>
         {[
-          { color: 'var(--red)', label: '' },
-          { color: 'var(--gold-dim)', label: '' },
-          { color: 'var(--gold)', label: '' },
-          { color: 'var(--green-light)', label: '' },
-          { color: 'var(--green)', label: 'perfect' },
-        ].map((c, i) => (
-          <div key={i} style={{ width: '10px', height: '10px', borderRadius: '2px', background: c.color }} />
+          'heatmap-legend-low',
+          'heatmap-legend-mid',
+          'heatmap-legend-high',
+          'heatmap-legend-max',
+        ].map((className) => (
+          <div key={className} className={`heatmap-legend-swatch ${className}`} />
         ))}
-        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>perfect</span>
+        <span className="heatmap-legend-text">many entries</span>
       </div>
     </div>
   );
@@ -141,27 +146,29 @@ function HeatmapGrid({ heatmap }: { heatmap: HeatmapData }) {
 
 // ─── Day of week bar chart ────────────────────────────────────────────────────
 
-function DowChart({ rates }: { rates: number[] }) {
-  // rates is [sun, mon, tue, wed, thu, fri, sat]
+function DowChart({ entries, loggedDays }: { entries: number[]; loggedDays: number[] }) {
   const labels = ['su', 'mo', 'tu', 'we', 'th', 'fr', 'sa'];
-  const max = Math.max(1, ...rates);
+  const max = Math.max(1, ...entries);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+    <div className="dow-chart">
       {labels.map((label, i) => (
-        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '12px', color: 'var(--text-muted)', width: '20px', flexShrink: 0 }}>{label}</span>
-          <div style={{ flex: 1, height: '12px', background: '#222', borderRadius: '2px', overflow: 'hidden', position: 'relative' }}>
-            <div style={{
-              width: `${rates[i]}%`,
-              height: '100%',
-              background: 'var(--gold)',
-              borderRadius: '2px',
-              opacity: rates[i] === 0 ? 0.2 : 1,
-            }} />
+        <div key={i} className="dow-row">
+          <span className="dow-label">{label}</span>
+          <div className="dow-track">
+            <svg className="dow-svg" viewBox="0 0 100 12" preserveAspectRatio="none">
+              <rect
+                className={`dow-bar ${entries[i] === 0 ? 'dow-bar-empty' : ''}`}
+                width={Math.round((entries[i] / max) * 100)}
+                height="12"
+                rx="2"
+              />
+            </svg>
           </div>
-          <span style={{ fontSize: '12px', color: rates[i] > 0 ? 'var(--gold)' : 'var(--text-faint)', width: '36px', textAlign: 'right', flexShrink: 0 }}>
-            {rates[i] > 0 ? `${rates[i]}%` : '—'}
+          <span
+            className={`dow-value ${entries[i] > 0 ? 'dow-value-active' : 'dow-value-empty'}`}
+          >
+            {entries[i] > 0 ? `${entries[i]} / ${loggedDays[i]}d` : '-'}
           </span>
         </div>
       ))}
@@ -177,21 +184,12 @@ function PeriodFilter({ periods, active, onChange }: {
   onChange: (days: number) => void;
 }) {
   return (
-    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+    <div className="flex flex-wrap gap-1.5">
       {periods.map((p) => (
         <button
           key={p.days}
           onClick={() => onChange(p.days)}
-          style={{
-            fontSize: '12px',
-            color: active === p.days ? 'var(--gold)' : 'var(--text-muted)',
-            fontWeight: active === p.days ? '600' : '400',
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            padding: 0,
-            fontFamily: 'inherit',
-          }}
+          className={`period-btn ${active === p.days ? 'period-btn-active' : 'period-btn-inactive'}`}
         >
           [{p.label}]
         </button>
@@ -209,12 +207,12 @@ function Section({ icon, title, subtitle, children }: {
   children: React.ReactNode;
 }) {
   return (
-    <div style={{ borderTop: '1px solid var(--border)', paddingTop: '20px', paddingBottom: '20px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+    <div className="stats-section">
+      <div className="stats-section-header">
         <span>{icon}</span>
-        <span style={{ fontSize: '14px', fontWeight: '600', color: 'var(--text)' }}>{title}</span>
+        <span className="stats-section-title">{title}</span>
       </div>
-      <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '14px' }}>
+      <div className="stats-section-subtitle">
         // {subtitle}
       </div>
       {children}
@@ -226,11 +224,11 @@ function Section({ icon, title, subtitle, children }: {
 
 function StatLine({ label, value, trend }: { label: string; value: string; trend?: number }) {
   return (
-    <div style={{ fontSize: '13px', color: 'var(--text-muted)', lineHeight: '1.8' }}>
+    <div className="stat-line">
       {label}:{' '}
-      <span style={{ color: 'var(--gold)' }}>{value}</span>
+      <span className="stat-value">{value}</span>
       {trend !== undefined && trend !== 0 && (
-        <span style={{ color: trend > 0 ? '#4caf50' : 'var(--red)', marginLeft: '6px', fontSize: '11px' }}>
+        <span className={trend > 0 ? 'stat-trend-up' : 'stat-trend-down'}>
           {trend > 0 ? `↑${trend}%` : `↓${Math.abs(trend)}%`}
         </span>
       )}
@@ -246,15 +244,26 @@ function AnalyticsTab() {
   const [stats, setStats] = useState<StatsData | null>(null);
   const [heatmapData, setHeatmapData] = useState<HeatmapData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   const loadStats = useCallback(async (days: number) => {
-    if (!hasDesktopApi()) { setLoading(false); return; }
+    if (!hasDesktopApi()) {
+      setError('desktop bridge not available — restart BuJo from the desktop shortcut.');
+      setLoading(false);
+      return;
+    }
     setLoading(true);
+    setError('');
     try {
       const data = await getStats(days);
-      if (data) setStats(data);
+      if (!data) {
+        setError('stats endpoint returned no data (desktop app not responding).');
+      } else {
+        setStats(data);
+      }
     } catch (err) {
       console.error('Failed to load stats:', err);
+      setError(err instanceof Error ? err.message : 'failed to load stats');
     } finally {
       setLoading(false);
     }
@@ -275,81 +284,108 @@ function AnalyticsTab() {
   };
 
   const totalTracked = stats?.allTime.daysTracked ?? 0;
-  const avgCompletion = stats?.allTime.rate ?? 0;
-  const perfectDays = stats?.allTime.perfectDays ?? 0;
   const currentStreak = stats?.currentStreak ?? streak;
   const bestStreak = stats?.bestStreak ?? 0;
-  const trend = stats ? stats.period.rate - stats.period.prevRate : 0;
+  const journal = stats?.journal;
+  const mixTotal = journal ? Math.max(1, journal.mix.tasks + journal.mix.notes + journal.mix.events) : 1;
 
   return (
-    <div style={{ maxWidth: '640px', margin: '0 auto', padding: '0 24px 40px' }}>
+    <div className="panel-page">
       {/* Terminal prompt */}
-      <div style={{ fontSize: '13px', marginBottom: '24px', paddingTop: '20px' }}>
-        <span style={{ color: 'var(--gold)' }}>ryan</span>
-        <span style={{ color: 'var(--text-muted)' }}>@</span>
-        <span style={{ color: 'var(--gold)' }}>bujo.vault</span>
-        <span style={{ color: 'var(--text-muted)' }}> $ </span>
-        <span style={{ color: 'var(--text)' }}>stats</span>
+      <div className="panel-command">
+        <span className="terminal-prompt">{getTerminalPrompt()}</span>
+        <span className="terminal-muted"> $ </span>
+        <span className="terminal-command-text">stats</span>
       </div>
 
       {loading ? (
-        <div style={{ color: 'var(--text-muted)', fontSize: '13px' }}>loading...</div>
+        <div className="panel-loading">loading...</div>
+      ) : error ? (
+        <div className="panel-error">// {error}</div>
       ) : !hasDesktopApi() ? (
-        <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
+        <div className="panel-small-muted">
           // stats require the desktop app
         </div>
       ) : (
         <>
           {/* quick glance */}
-          <Section icon="👁" title="quick glance" subtitle="your overall tracking summary">
-            <StatLine label="days tracked" value={totalTracked.toString()} />
-            <StatLine label="avg completion" value={`${avgCompletion}%`} />
-            <StatLine label="perfect days" value={perfectDays.toString()} />
+          <Section icon="*" title="quick glance" subtitle="your logging rhythm, not a productivity grade">
+            <StatLine label="days logged" value={`${journal?.activeDays ?? 0}/${periodDays}`} />
+            <StatLine label="entries captured" value={`${journal?.periodEntries ?? 0}`} />
+            <StatLine label="avg per logged day" value={`${journal?.entriesPerTrackedDay ?? 0}`} />
+            <StatLine label="all-time logged days" value={totalTracked.toString()} />
           </Section>
 
           {/* streaks */}
-          <Section icon="🔥" title="streaks" subtitle="consecutive days with entries">
+          <Section icon="~" title="streaks" subtitle="consecutive days with any real entry">
             <StatLine label="current streak" value={`${currentStreak} days`} />
             <StatLine label="best streak" value={`${bestStreak} days`} />
           </Section>
 
-          {/* completion rates */}
-          <Section icon="📊" title="completion rates" subtitle="how often you complete scheduled tasks">
-            <div style={{ marginBottom: '12px' }}>
+          {/* entry mix */}
+          <Section icon="|" title="entry mix" subtitle="what kind of material you are capturing">
+            <div className="mb-3">
               <PeriodFilter periods={PERIODS} active={periodDays} onChange={handlePeriodChange} />
             </div>
             {stats && (
               <>
-                <StatLine
-                  label={`${PERIODS.find(p => p.days === periodDays)?.label ?? periodDays + 'd'}`}
-                  value={`${stats.period.rate}%`}
-                  trend={trend}
-                />
-                <StatLine label="all time" value={`${stats.allTime.rate}%`} />
-                <StatLine label="green days" value={`${stats.period.greenDays}/${stats.period.daysTracked}`} />
-                <StatLine label="weekday avg" value={`${stats.period.weekdayAvg}%`} />
-                <StatLine label="weekend avg" value={`${stats.period.weekendAvg}%`} />
+                <StatLine label="notes / reflections" value={`${journal?.mix.notes ?? 0} (${Math.round(((journal?.mix.notes ?? 0) / mixTotal) * 100)}%)`} />
+                <StatLine label="tasks / open loops" value={`${journal?.mix.tasks ?? 0} (${Math.round(((journal?.mix.tasks ?? 0) / mixTotal) * 100)}%)`} />
+                <StatLine label="events / happened" value={`${journal?.mix.events ?? 0} (${Math.round(((journal?.mix.events ?? 0) / mixTotal) * 100)}%)`} />
               </>
             )}
           </Section>
 
-          {/* contributions */}
+          {journal && (
+            <Section icon=":" title="signals" subtitle="soft patterns from the words you used">
+              <StatLine label="low energy" value={`${journal.signals.lowEnergy}`} />
+              <StatLine label="stress / pressure" value={`${journal.signals.stress}`} />
+              <StatLine label="satisfaction / okayness" value={`${journal.signals.satisfaction}`} />
+              <StatLine label="pride / wins" value={`${journal.signals.pride}`} />
+            </Section>
+          )}
+
           {heatmapData && Object.keys(heatmapData).length > 0 && (
-            <Section icon="📅" title="contributions" subtitle="your activity over the past year">
+            <Section icon="#" title="contributions" subtitle="activity intensity over the past year">
               <HeatmapGrid heatmap={heatmapData || {}} />
-              <div style={{ marginTop: '10px', fontSize: '11px', color: 'var(--text-muted)' }}>
-                // {totalTracked} days tracked · {avgCompletion}% avg · {perfectDays} perfect days
+              <div className="section-note">
+                // darker means quiet; brighter means more captured
               </div>
             </Section>
           )}
 
-          {/* day of week */}
-          {stats?.dowRates && (
-            <Section icon="📅" title="day of week" subtitle="completion rates broken down by day">
-              <div style={{ marginBottom: '12px' }}>
+          {stats?.dowEntries && (
+            <Section icon="+" title="day rhythm" subtitle="which weekdays tend to hold more logging">
+              <div className="mb-3">
                 <PeriodFilter periods={PERIODS} active={periodDays} onChange={handlePeriodChange} />
               </div>
-              <DowChart rates={stats.dowRates} />
+              <DowChart entries={stats.dowEntries} loggedDays={stats.dowLoggedDays} />
+            </Section>
+          )}
+
+          {journal && journal.themes.length > 0 && (
+            <Section icon="@" title="recurring threads" subtitle="topics that kept showing up">
+              {journal.themes.map(theme => (
+                <div key={theme.label}>
+                  <StatLine label={theme.label} value={`${theme.count}`} />
+                </div>
+              ))}
+            </Section>
+          )}
+
+          {journal && journal.openLoops.length > 0 && (
+            <Section icon=">" title="open loops" subtitle="actions and commitments still worth seeing">
+              <div className="flex flex-col gap-2">
+                {journal.openLoops.map((loop, index) => (
+                  <div key={`${loop.date}-${index}`} className="open-loop-row">
+                    <span className="open-loop-date">{loop.date}</span>
+                    <span> / {loop.text}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="section-note">
+                // task completion still exists, but it is no longer the main story of stats
+              </div>
             </Section>
           )}
         </>
@@ -370,7 +406,7 @@ const PERSPECTIVES = [
   { id: 'synthesis', label: 'synthesis', desc: 'combined report' },
 ];
 
-function MonthlyReviewTab() {
+export function MonthlyReviewTab() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const monthKey = format(currentMonth, 'yyyy-MM');
   const monthLabel = format(currentMonth, 'MMMM yyyy');
@@ -419,48 +455,38 @@ function MonthlyReviewTab() {
   const availableCount = Object.values(status).filter(Boolean).length;
 
   return (
-    <div style={{ maxWidth: '640px', margin: '0 auto', padding: '0 24px 40px' }}>
+    <div className="panel-page">
       {/* Terminal prompt */}
-      <div style={{ fontSize: '13px', marginBottom: '24px', paddingTop: '20px' }}>
-        <span style={{ color: 'var(--gold)' }}>ryan</span>
-        <span style={{ color: 'var(--text-muted)' }}>@</span>
-        <span style={{ color: 'var(--gold)' }}>bujo.vault</span>
-        <span style={{ color: 'var(--text-muted)' }}> $ </span>
-        <span style={{ color: 'var(--text)' }}>review</span>
+      <div className="panel-command">
+        <span className="terminal-prompt">{getTerminalPrompt()}</span>
+        <span className="terminal-muted"> $ </span>
+        <span className="terminal-command-text">review</span>
       </div>
 
       {/* Month nav */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px', borderTop: '1px solid var(--border)', paddingTop: '20px' }}>
-        <button onClick={() => setCurrentMonth(subMonths(currentMonth, 1))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
+      <div className="review-month-nav">
+        <button onClick={() => setCurrentMonth(subMonths(currentMonth, 1))} className="review-nav-button">
           <ChevronLeft size={14} />
         </button>
-        <span style={{ fontSize: '13px', color: 'var(--text)' }}>{monthLabel.toLowerCase()}</span>
-        <button onClick={() => setCurrentMonth(addMonths(currentMonth, 1))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
+        <span className="review-month-label">{monthLabel.toLowerCase()}</span>
+        <button onClick={() => setCurrentMonth(addMonths(currentMonth, 1))} className="review-nav-button">
           <ChevronRight size={14} />
         </button>
-        <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: 'auto' }}>
+        <span className="review-count">
           {availableCount}/7 perspectives
         </span>
       </div>
 
       {/* Perspective tabs */}
-      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '20px' }}>
+      <div className="review-tabs">
         {PERSPECTIVES.map((p) => (
           <button
             key={p.id}
             onClick={() => setActivePerspective(p.id)}
-            style={{
-              fontSize: '12px',
-              color: activePerspective === p.id ? 'var(--gold)' : status[p.id] ? 'var(--text)' : 'var(--text-faint)',
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              fontFamily: 'inherit',
-              padding: 0,
-              textDecoration: activePerspective === p.id ? 'underline' : 'none',
-              textUnderlineOffset: '3px',
-              textDecorationColor: 'var(--gold)',
-            }}
+            className={[
+              'review-tab',
+              activePerspective === p.id ? 'review-tab-active' : status[p.id] ? 'review-tab-ready' : 'review-tab-empty',
+            ].join(' ')}
           >
             [{p.label}{status[p.id] ? ' ●' : ''}]
           </button>
@@ -468,51 +494,38 @@ function MonthlyReviewTab() {
       </div>
 
       {/* Content area */}
-      <div style={{ borderTop: '1px solid var(--border)', paddingTop: '20px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+      <div className="review-content">
+        <div className="review-content-header">
           <div>
-            <div style={{ fontSize: '14px', fontWeight: '600', color: 'var(--text)' }}>
+            <div className="review-title">
               {PERSPECTIVES.find(p => p.id === activePerspective)?.label}
             </div>
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+            <div className="review-subtitle">
               // {PERSPECTIVES.find(p => p.id === activePerspective)?.desc}
             </div>
           </div>
           <button
             onClick={() => handleGenerate(activePerspective)}
             disabled={isGenerating}
-            style={{
-              fontSize: '12px',
-              color: 'var(--gold)',
-              background: 'none',
-              border: '1px solid var(--gold-dim)',
-              borderRadius: '4px',
-              padding: '4px 12px',
-              cursor: isGenerating ? 'not-allowed' : 'pointer',
-              fontFamily: 'inherit',
-              opacity: isGenerating ? 0.5 : 1,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
+            className={`review-generate ${isGenerating ? 'review-generate-disabled' : ''}`}
           >
-            {isGenerating ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Sparkles size={12} />}
+            {isGenerating ? <Loader2 size={12} className="spin" /> : <Sparkles size={12} />}
             {status[activePerspective] ? 'regen' : 'generate'}
           </button>
         </div>
 
-        {error && <div style={{ fontSize: '12px', color: 'var(--red)', marginBottom: '12px' }}>{error}</div>}
+        {error && <div className="panel-error mb-3">{error}</div>}
 
         {isLoading ? (
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>loading...</div>
+          <div className="panel-small-muted">loading...</div>
         ) : content ? (
-          <pre style={{ fontSize: '12px', color: 'var(--text)', lineHeight: '1.7', whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>
+          <pre className="review-output">
             {content}
           </pre>
         ) : (
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+          <div className="panel-small-muted">
             <div>// no analysis generated yet</div>
-            <div style={{ marginTop: '4px', color: 'var(--text-faint)' }}>
+            <div className="mt-1 text-faint">
               // click generate to analyze {monthLabel.toLowerCase()} from the {PERSPECTIVES.find(p => p.id === activePerspective)?.label} perspective
             </div>
           </div>
@@ -520,26 +533,14 @@ function MonthlyReviewTab() {
       </div>
 
       {activePerspective !== 'synthesis' && availableCount >= 3 && !status['synthesis'] && (
-        <div style={{ marginTop: '24px', borderTop: '1px solid var(--border)', paddingTop: '20px' }}>
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>
+        <div className="synthesis-callout">
+          <div className="synthesis-callout-hint">
             // {availableCount} perspectives available — ready for synthesis
           </div>
           <button
             onClick={() => { setActivePerspective('synthesis'); handleGenerate('synthesis'); }}
             disabled={isGenerating}
-            style={{
-              fontSize: '12px',
-              color: 'var(--gold)',
-              background: 'none',
-              border: '1px solid var(--gold-dim)',
-              borderRadius: '4px',
-              padding: '4px 12px',
-              cursor: 'pointer',
-              fontFamily: 'inherit',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
+            className="synthesis-callout-btn"
           >
             <Sparkles size={12} /> synthesize
           </button>
@@ -552,34 +553,10 @@ function MonthlyReviewTab() {
 // ─── ReviewView ───────────────────────────────────────────────────────────────
 
 export function ReviewView() {
-  const [tab, setTab] = useState<'stats' | 'review'>('stats');
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-      {/* Sub-tab bar */}
-      <div style={{ display: 'flex', gap: '20px', padding: '0 24px', borderBottom: '1px solid var(--border)' }}>
-        {(['stats', 'review'] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            style={{
-              fontSize: '12px',
-              color: tab === t ? 'var(--text)' : 'var(--text-faint)',
-              background: 'none',
-              border: 'none',
-              borderBottom: tab === t ? '1px solid var(--gold)' : '1px solid transparent',
-              padding: '10px 0',
-              cursor: 'pointer',
-              fontFamily: 'inherit',
-            }}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
-
-      <div style={{ flex: 1, overflowY: 'auto' }} className="scrollbar-hide">
-        {tab === 'stats' ? <AnalyticsTab /> : <MonthlyReviewTab />}
+    <div className="view-shell">
+      <div className="coach-body">
+        <AnalyticsTab />
       </div>
     </div>
   );

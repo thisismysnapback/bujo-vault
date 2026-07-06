@@ -9,6 +9,8 @@ import {
   retryDump,
   summarizeDay,
   analyzeMigrationTask,
+  clearAllData,
+  generateReview,
   getCoachNudge,
   searchEntries,
 } from '../desktop';
@@ -35,6 +37,9 @@ function installBujoApi(overrides: Record<string, any> = {}) {
     coachNudgeLlm: vi.fn().mockResolvedValue({ nudge: 'do one small thing', source: 'llm' }),
     analyticsCoach: vi.fn().mockResolvedValue({ nudge: 'rule fallback' }),
     search: vi.fn().mockResolvedValue([{ id: 'e1', type: 'task', content: 'buy milk', timestamp: 1, source_date: '2026-06-02', display: '· buy milk' }]),
+    reviewPerspective: vi.fn().mockResolvedValue({ content: 'perspective review' }),
+    reviewSynthesize: vi.fn().mockResolvedValue({ content: 'synthesis review' }),
+    clearAllData: vi.fn().mockResolvedValue({ success: true }),
     ...overrides,
   };
   (window as any).bujo = api;
@@ -97,5 +102,26 @@ describe('desktop service boundary', () => {
 
     await expect(getCoachNudge('2026-06-02')).resolves.toEqual({ nudge: 'rule fallback', source: 'rule' });
     expect(api.analyticsCoach).toHaveBeenCalledOnce();
+  });
+
+  it('routes review generation to synthesis or perspective IPC calls', async () => {
+    const api = installBujoApi();
+
+    await expect(generateReview('2026-06', 'synthesis')).resolves.toEqual({ content: 'synthesis review' });
+    await expect(generateReview('2026-06', 'creative', true)).resolves.toEqual({ content: 'perspective review' });
+
+    expect(api.reviewSynthesize).toHaveBeenCalledWith('2026-06');
+    expect(api.reviewPerspective).toHaveBeenCalledWith('2026-06', 'creative', true);
+  });
+
+  it('guards clear-all-data behind the desktop API result', async () => {
+    await expect(clearAllData()).resolves.toBe(false);
+
+    const api = installBujoApi();
+    await expect(clearAllData()).resolves.toBe(true);
+    expect(api.clearAllData).toHaveBeenCalledOnce();
+
+    installBujoApi({ clearAllData: vi.fn().mockResolvedValue({ success: false }) });
+    await expect(clearAllData()).resolves.toBe(false);
   });
 });

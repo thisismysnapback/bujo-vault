@@ -27,3 +27,8 @@ export function getTodayDateString(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
+
+export function getTerminalPrompt(): string {
+  if (typeof window === 'undefined' || !window.localStorage) return 'user@bujo.vault';
+  return window.localStorage.getItem('bujo:username') || 'user@bujo.vault';
+}

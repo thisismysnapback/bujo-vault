@@ -13,6 +13,7 @@ import { HelpOverlay } from './components/HelpOverlay';
 import { CalendarView } from './components/CalendarView';
 import { HabitView } from './components/HabitView';
 import { CommandPalette } from './components/CommandPalette';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { getTodayDateString } from './lib/utils';
 
 function MainContent() {
@@ -47,17 +48,17 @@ function MainContent() {
   if (showHelp) return <HelpOverlay onClose={() => setShowHelp(false)} />;
 
   return (
-    <div className="flex-1 min-h-0 overflow-hidden" style={{ background: 'var(--bg)' }}>
-      {currentView === 'daily' && <DailyView />}
-      {currentView === 'calendar' && <CalendarView />}
-      {currentView === 'monthly' && <MonthlyView />}
-      {currentView === 'future' && <FutureLog />}
-      {currentView === 'migration' && <MigrationView />}
-      {currentView === 'review' && <ReviewView />}
-      {currentView === 'search' && <SearchView />}
-      {currentView === 'settings' && <SettingsView />}
-      {currentView === 'coach' && <CoachView onClose={() => {}} />}
-      {currentView === 'habits' && <HabitView />}
+    <div className="app-main">
+      {currentView === 'daily' && <ErrorBoundary viewName="daily"><DailyView /></ErrorBoundary>}
+      {currentView === 'calendar' && <ErrorBoundary viewName="calendar"><CalendarView /></ErrorBoundary>}
+      {currentView === 'monthly' && <ErrorBoundary viewName="monthly"><MonthlyView /></ErrorBoundary>}
+      {currentView === 'future' && <ErrorBoundary viewName="future"><FutureLog /></ErrorBoundary>}
+      {currentView === 'migration' && <ErrorBoundary viewName="migration"><MigrationView /></ErrorBoundary>}
+      {currentView === 'review' && <ErrorBoundary viewName="review"><ReviewView /></ErrorBoundary>}
+      {currentView === 'search' && <ErrorBoundary viewName="search"><SearchView /></ErrorBoundary>}
+      {currentView === 'settings' && <ErrorBoundary viewName="settings"><SettingsView /></ErrorBoundary>}
+      {currentView === 'coach' && <ErrorBoundary viewName="coach"><CoachView onClose={() => setCurrentView('daily')} /></ErrorBoundary>}
+      {currentView === 'habits' && <ErrorBoundary viewName="habits"><HabitView /></ErrorBoundary>}
       {showCommandPalette && (
         <CommandPalette
           currentView={currentView}
@@ -76,7 +77,7 @@ function MainContent() {
 export default function App() {
   return (
     <VaultProvider>
-      <div className="flex flex-col h-screen w-full overflow-hidden" style={{ background: 'var(--bg)', color: 'var(--text)', fontFamily: "'JetBrains Mono', monospace" }}>
+      <div className="app-root">
         <TopNav />
         <MainContent />
       </div>

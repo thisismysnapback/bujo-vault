@@ -77,12 +77,12 @@ export function entrySymbol(entry: Entry): string {
 
 export function entrySortKey(entry: Entry): number {
   if (entry.kind === 'task' && entry.meta?.priority) return 0;
-  if (entry.kind === 'task' && entry.status === 'active') return 1;
-  if (entry.kind === 'event') return 2;
-  if (entry.kind === 'note') return 3;
-  if (entry.status === 'killed') return 4;
-  if (entry.status === 'done') return 5;
-  if (entry.status === 'migrated') return 6;
-  if (entry.meta?.scheduledFor) return 6;
+  if (entry.kind === 'task' && entry.meta?.scheduledFor) return 1;
+  if (entry.kind === 'task' && entry.status === 'active') return 2;
+  if (entry.kind === 'event') return 3;
+  if (entry.kind === 'note') return 4;
+  if (entry.status === 'killed') return 5;
+  if (entry.status === 'done') return 6;
+  if (entry.status === 'migrated') return 7;
   return 99;
 }

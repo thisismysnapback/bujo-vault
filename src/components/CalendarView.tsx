@@ -1,12 +1,12 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useVault } from '../store/VaultContext';
-import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays, addMonths, subMonths, isSameMonth, isSameDay, isToday } from 'date-fns';
+import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays, addMonths, subMonths, isSameMonth } from 'date-fns';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { getTodayDateString } from '../lib/utils';
+import { getTerminalPrompt, getTodayDateString } from '../lib/utils';
 import { DailyLog } from '../types';
 
 export function CalendarView() {
-  const { logs, setCurrentView } = useVault();
+  const { logs, navigateToDate } = useVault();
   const [currentMonth, setCurrentMonth] = useState(new Date());
 
   const monthStart = startOfMonth(currentMonth);
@@ -39,8 +39,7 @@ export function CalendarView() {
 
   const handleDayClick = (date: Date) => {
     const dateStr = format(date, 'yyyy-MM-dd');
-    (window as any).__bujoNavigateDate = dateStr;
-    setCurrentView('daily');
+    navigateToDate(dateStr);
   };
 
   const prevMonth = () => setCurrentMonth(subMonths(currentMonth, 1));
@@ -49,50 +48,39 @@ export function CalendarView() {
 
   const weekdays = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 
-  const navBtnStyle: React.CSSProperties = {
-    background: 'transparent',
-    border: 'none',
-    color: 'var(--text-muted)',
-    cursor: 'pointer',
-    padding: '6px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  };
-
   const todayStr = getTodayDateString();
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-      <div style={{ padding: '48px 32px 16px', maxWidth: '768px', width: '100%', margin: '0 auto' }}>
-        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
-          ryan@bujo.vault $ cal
+    <div className="calendar-shell">
+      <div className="calendar-header">
+        <div className="calendar-command">
+          {getTerminalPrompt()} $ cal
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-          <h1 style={{ fontSize: '28px', fontWeight: 300, letterSpacing: '-0.02em', color: 'var(--text)', margin: '4px 0 2px' }}>
+        <div className="calendar-title-row">
+          <h1 className="calendar-title">
             {format(currentMonth, 'MMMM yyyy').toLowerCase()}
           </h1>
-          <div style={{ display: 'flex', gap: '4px' }}>
-            <button onClick={prevMonth} style={navBtnStyle}><ChevronLeft size={18} /></button>
-            <button onClick={goToday} style={{ ...navBtnStyle, padding: '6px 12px', fontSize: '12px' }}>today</button>
-            <button onClick={nextMonth} style={navBtnStyle}><ChevronRight size={18} /></button>
+          <div className="calendar-nav">
+            <button onClick={prevMonth} className="calendar-nav-button"><ChevronLeft size={18} /></button>
+            <button onClick={goToday} className="calendar-nav-button calendar-today-button">today</button>
+            <button onClick={nextMonth} className="calendar-nav-button"><ChevronRight size={18} /></button>
           </div>
         </div>
-        <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+        <p className="calendar-subtitle">
           // {format(currentMonth, 'MMMM yyyy').toLowerCase()} overview
         </p>
       </div>
 
-      <div className="scrollbar-hide" style={{ flex: 1, overflowY: 'auto', padding: '16px 32px', maxWidth: '768px', width: '100%', margin: '0 auto' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px', marginBottom: '4px' }}>
+      <div className="calendar-scroll">
+        <div className="calendar-weekdays">
           {weekdays.map(day => (
-            <div key={day} style={{ textAlign: 'center', fontSize: '10px', color: 'var(--text-muted)', padding: '8px 0', fontWeight: 500 }}>
+            <div key={day} className="calendar-weekday">
               {day}
             </div>
           ))}
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px' }}>
+        <div className="calendar-grid">
           {days.map((day, idx) => {
             const dateStr = format(day, 'yyyy-MM-dd');
             const entry = entryMap[dateStr];
@@ -103,28 +91,18 @@ export function CalendarView() {
               <button
                 key={idx}
                 onClick={() => handleDayClick(day)}
-                style={{
-                  aspectRatio: '1',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '13px',
-                  background: isTodayDate ? 'var(--bg-hover)' : 'transparent',
-                  border: 'none',
-                  cursor: 'pointer',
-                  color: inMonth ? 'var(--text)' : 'var(--text-faint)',
-                  fontWeight: isTodayDate ? 500 : 400,
-                  transition: 'background 0.1s',
-                  padding: 0,
-                }}
+                className={[
+                  'calendar-day',
+                  !inMonth ? 'calendar-day-outside' : '',
+                  isTodayDate ? 'calendar-day-today' : '',
+                ].filter(Boolean).join(' ')}
               >
                 <span>{format(day, 'd')}</span>
                 {entry && entry.count > 0 && (
-                  <div style={{ display: 'flex', gap: '3px', marginTop: '2px' }}>
-                    {entry.hasPriority && <span style={{ width: '4px', height: '4px', borderRadius: '50%', background: 'var(--gold-bright)' }} />}
-                    {entry.hasDone && <span style={{ width: '4px', height: '4px', borderRadius: '50%', background: '#4caf50' }} />}
-                    {!entry.hasPriority && !entry.hasDone && <span style={{ width: '4px', height: '4px', borderRadius: '50%', background: 'var(--text-faint)' }} />}
+                  <div className="calendar-dots">
+                    {entry.hasPriority && <span className="calendar-dot calendar-dot-priority" />}
+                    {entry.hasDone && <span className="calendar-dot calendar-dot-done" />}
+                    {!entry.hasPriority && !entry.hasDone && <span className="calendar-dot calendar-dot-entry" />}
                   </div>
                 )}
               </button>
@@ -132,17 +110,17 @@ export function CalendarView() {
           })}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginTop: '16px', padding: '0 4px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-muted)' }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--gold-bright)' }} />
+        <div className="calendar-legend">
+          <div className="calendar-legend-item">
+            <span className="calendar-legend-dot calendar-dot-priority" />
             has priorities
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-muted)' }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#4caf50' }} />
+          <div className="calendar-legend-item">
+            <span className="calendar-legend-dot calendar-dot-done" />
             has completed
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-muted)' }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--text-faint)' }} />
+          <div className="calendar-legend-item">
+            <span className="calendar-legend-dot calendar-dot-entry" />
             has entries
           </div>
         </div>

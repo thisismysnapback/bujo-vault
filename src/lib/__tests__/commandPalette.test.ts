@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { buildCommandPaletteItems, captureContentForCommand, filterCommandPaletteItems, getCommandPalettePlaceholder } from '../commandPalette';
+import {
+  buildCommandPaletteItems,
+  captureContentForCommand,
+  filterCommandPaletteItems,
+  getCommandPalettePlaceholder,
+  parseFreeTextCapture,
+} from '../commandPalette';
 
 describe('command palette model', () => {
   it('builds navigation, action, and capture commands', () => {
@@ -45,5 +51,12 @@ describe('command palette model', () => {
     expect(captureContentForCommand(note, 'note idea')).toBe('idea');
     expect(captureContentForCommand(event, 'event team sync')).toBe('team sync');
     expect(captureContentForCommand(priority, 'priority ship audit fixes')).toBe('ship audit fixes');
+  });
+
+  it('parses free-text capture prefixes before falling back to tasks', () => {
+    expect(parseFreeTextCapture('note: keep this thought')).toEqual({ type: 'note', content: 'keep this thought' });
+    expect(parseFreeTextCapture('event team sync')).toEqual({ type: 'event', content: 'team sync' });
+    expect(parseFreeTextCapture('priority ship audit fixes')).toEqual({ type: 'priority', content: 'ship audit fixes' });
+    expect(parseFreeTextCapture('buy oat milk')).toEqual({ type: 'task', content: 'buy oat milk' });
   });
 });

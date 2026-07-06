@@ -2,11 +2,14 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useVault } from '../store/VaultContext';
 import { EntryType } from '../types';
 import { parseDump } from '../services/ai';
-import { retryDump } from '../services/desktop';
+import { retryDump, saveOriginalInput } from '../services/desktop';
 import { Sparkles, Loader2, RotateCcw } from 'lucide-react';
 
 interface InputBarProps {
   date: string;
+  prefill?: string;
+  onPrefillConsumed?: () => void;
+  onEntrySaved?: () => void;
 }
 
 const PREFIX_MAP: Record<string, EntryType> = {
@@ -27,34 +30,64 @@ const PREFIX_MAP: Record<string, EntryType> = {
   '< ': 'scheduled',
 };
 
-export function InputBar({ date }: InputBarProps) {
+export function InputBar({ date, prefill, onPrefillConsumed, onEntrySaved }: InputBarProps) {
   const { addEntry, addMultipleEntries } = useVault();
-  const [value, setValue] = useState('');
+  const draftKey = `bujo:draft:${date}`;
+  const [value, setValue] = useState(() => {
+    try {
+      return window.localStorage.getItem(draftKey) || '';
+    } catch {
+      return '';
+    }
+  });
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState('');
   const [retryCount, setRetryCount] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const clearDraft = () => {
+    try { window.localStorage.removeItem(draftKey); } catch { /* ignore */ }
+  };
+
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  useEffect(() => {
+    try {
+      if (value.trim()) window.localStorage.setItem(draftKey, value);
+      else window.localStorage.removeItem(draftKey);
+    } catch { /* ignore */ }
+  }, [draftKey, value]);
+
+  useEffect(() => {
+    if (prefill && prefill.trim()) {
+      setValue(prefill);
+      inputRef.current?.focus();
+      onPrefillConsumed?.();
+    }
+  }, [prefill, onPrefillConsumed]);
 
   const handleDump = async (text: string) => {
     setIsProcessing(true);
     setError('');
     try {
-      const parsed = await parseDump(text);
+      const parsed = await parseDump(text, date);
       if (parsed && parsed.length > 0) {
-        addMultipleEntries(date, parsed);
+        await saveOriginalInput(date, text);
+        await addMultipleEntries(date, parsed);
       } else {
-        addEntry(date, 'note', text);
+        await saveOriginalInput(date, text);
+        await addEntry(date, 'note', text);
       }
+      setValue('');
+      clearDraft();
+      onEntrySaved?.();
     } catch (err) {
       console.error(err);
-      setError("Failed to parse dump. Check your API key in Settings.");
+      setError("Failed to parse dump — kept your draft. Check your API key or press Enter again to save it as a note.");
     } finally {
       setIsProcessing(false);
-      setValue('');
     }
   };
 
@@ -83,25 +116,13 @@ export function InputBar({ date }: InputBarProps) {
     if (e.key === 'Enter' && value.trim()) {
       const text = value.trim();
       
-      let isDump = text.toLowerCase().startsWith('dump ');
-      let dumpText = isDump ? text.substring(5).trim() : text;
+      const lowerText = text.toLowerCase();
+      const isDump = lowerText.startsWith('dump:') || lowerText.startsWith('brain:') || lowerText.startsWith('parse:');
+      const dumpText = isDump ? text.slice(text.indexOf(':') + 1).trim() : text;
       
       if (!isDump) {
-        let hasPrefix = false;
-        for (const prefix of Object.keys(PREFIX_MAP)) {
-          if (text.toLowerCase().startsWith(prefix)) {
-            hasPrefix = true;
-            break;
-          }
-        }
-        
-        // Auto-detect brain dump: no prefix, > 60 chars, and contains multiple clauses/sentences
-        if (!hasPrefix && text.length > 60 && (text.split(',').length > 2 || text.split('.').length > 1 || text.split(' and ').length > 1)) {
-          isDump = true;
-        }
-      }
-
-      if (isDump) {
+        // Brain dump parsing is intentionally explicit. Long ordinary tasks should never be split by surprise.
+      } else if (dumpText) {
         handleDump(dumpText);
         return;
       }
@@ -130,18 +151,26 @@ export function InputBar({ date }: InputBarProps) {
         content = content.slice(0, -7).trim();
       }
 
-      addEntry(date, type, content);
-      setValue('');
-      setError('');
+      try {
+        await addEntry(date, type, content);
+        setValue('');
+        clearDraft();
+        setError('');
+        onEntrySaved?.();
+      } catch (err) {
+        console.error(err);
+        setError('Failed to save entry — kept your draft.');
+      }
     }
   };
 
-  const isDumpMode = value.toLowerCase().startsWith('dump ') || (value.length > 60 && !Object.keys(PREFIX_MAP).some(p => value.toLowerCase().startsWith(p)));
+  const lowerValue = value.toLowerCase();
+  const isDumpMode = lowerValue.startsWith('dump:') || lowerValue.startsWith('brain:') || lowerValue.startsWith('parse:');
 
   return (
-    <div style={{ position: 'relative', width: '100%' }}>
-      <div style={{ display: 'flex', alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: '12px', gap: '8px' }}>
-        <span style={{ fontSize: '12px', color: 'var(--gold)', flexShrink: 0 }}>›</span>
+    <div className="input-bar">
+      <div className="input-bar-row">
+        <span className="input-bar-prompt">›</span>
         <input
           ref={inputRef}
           type="text"
@@ -150,30 +179,21 @@ export function InputBar({ date }: InputBarProps) {
           onKeyDown={handleKeyDown}
           disabled={isProcessing}
           placeholder="type entry or dump a brain dump..."
-          style={{
-            flex: 1,
-            background: 'transparent',
-            border: 'none',
-            outline: 'none',
-            color: 'var(--text)',
-            fontSize: '13px',
-            fontFamily: 'inherit',
-            opacity: isProcessing ? 0.5 : 1,
-          }}
+          className={`input-bar-field ${isProcessing ? 'input-bar-disabled' : ''}`}
         />
-        {isProcessing && <Loader2 size={12} style={{ color: 'var(--text-muted)', animation: 'spin 1s linear infinite', flexShrink: 0 }} />}
-        {isDumpMode && !isProcessing && <Sparkles size={12} style={{ color: 'var(--gold)', flexShrink: 0 }} />}
+        {isProcessing && <Loader2 size={12} className="input-bar-icon terminal-muted spin" />}
+        {isDumpMode && !isProcessing && <Sparkles size={12} className="input-bar-icon text-gold" />}
         <button
           onClick={handleRetry}
           disabled={isProcessing}
           title="Retry unprocessed dumps"
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', flexShrink: 0, padding: 0 }}
+          className="input-bar-retry"
         >
           <RotateCcw size={11} />
         </button>
       </div>
-      {error && <div style={{ fontSize: '11px', color: 'var(--red)', marginTop: '6px' }}>{error}</div>}
-      {retryCount !== null && <div style={{ fontSize: '11px', color: '#4caf50', marginTop: '6px' }}>re-parsed {retryCount} entries.</div>}
+      {error && <div className="input-bar-error">{error}</div>}
+      {retryCount !== null && <div className="input-bar-success">re-parsed {retryCount} entries.</div>}
     </div>
   );
 }

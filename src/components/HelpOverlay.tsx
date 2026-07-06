@@ -74,32 +74,31 @@ export function HelpOverlay({ onClose }: HelpOverlayProps) {
 
   return (
     <div
-      style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.7)' }}
+      className="help-backdrop"
       onClick={onClose}
     >
       <div
-        style={{ background: 'var(--bg)', border: '1px solid var(--border)', padding: '32px', maxWidth: '640px', width: '100%', margin: '0 16px', maxHeight: '80vh', overflowY: 'auto' }}
-        className="scrollbar-hide"
+        className="help-panel scrollbar-hide"
         onClick={(e) => e.stopPropagation()}
       >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
-          <h2 style={{ fontSize: '18px', color: 'var(--gold)', fontWeight: 400 }}>keybindings</h2>
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>? or escape to close</span>
+        <div className="help-header">
+          <h2 className="help-title">keybindings</h2>
+          <span className="help-hint">? or escape to close</span>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '24px' }}>
+        <div className="help-grid">
           {HELP_SECTIONS.map((section) => (
             <div key={section.title}>
-              <h3 style={{ fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '12px' }}>
+              <h3 className="help-section-title">
                 {section.title}
               </h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <div className="help-items">
                 {section.items.map((item) => (
-                  <div key={item.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-                    <kbd style={{ color: 'var(--gold)', background: 'var(--bg-hover)', padding: '2px 6px', fontSize: '11px', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                  <div key={item.key} className="help-item">
+                    <kbd className="help-kbd">
                       {item.key}
                     </kbd>
-                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', textAlign: 'right' }}>{item.desc}</span>
+                    <span className="help-desc">{item.desc}</span>
                   </div>
                 ))}
               </div>

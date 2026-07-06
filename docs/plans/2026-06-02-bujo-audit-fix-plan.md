@@ -1,5 +1,10 @@
 # BuJo Audit Fix Implementation Plan
 
+> **Historical plan — June 2, 2026.** This document records the original audit-fix
+> execution plan and is not the current project-status source. See
+> [`../../IMPLEMENTATION_PLAN.md`](../../IMPLEMENTATION_PLAN.md) for the verified
+> canonical status and remaining work as of June 23, 2026.
+
 > **For Hermes:** Implement this plan in order. Do not skip tests. Each phase should end with `npm test && npm run lint && npm run build` unless explicitly noted.
 
 **Goal:** Fix all audit findings from the BuJo phases 4-8 audit: broken entry identity/CRUD, migration false-success, IPC path validation/security, API-key exposure, monthly CRUD, analytics/UI regressions, and test gaps.

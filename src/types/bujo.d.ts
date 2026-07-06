@@ -14,7 +14,12 @@ export interface BuJoApi {
   }>>
 
   // Entries
-  appendEntry(date: string, type: string, content: string): Promise<{ success: boolean }>
+  appendEntry(date: string, type: string, content: string): Promise<{ success: boolean; entry?: {
+    id: string; type: string; content: string; timestamp: number; source_date: string; display: string
+  }; autoCompleted?: Array<{ date: string; id: string; daysStalled: number; task: string; evidence: string }>; error?: string }>
+  appendEntriesBatch?(date: string, entries: Array<{ type: string; content: string }>): Promise<{ success: boolean; entries?: Array<{
+    id: string; type: string; content: string; timestamp: number; source_date: string; display: string
+  }>; autoCompleted?: Array<{ date: string; id: string; daysStalled: number; task: string; evidence: string }>; error?: string }>
   appendMonthlyEntry(monthKey: string, type: string, content: string): Promise<{ success: boolean }>
   appendFutureEntry(monthLabel: string, content: string): Promise<{ success: boolean }>
   updateEntry(date: string, id: string, type: string, content: string): Promise<{ success?: boolean; error?: string }>
@@ -29,6 +34,8 @@ export interface BuJoApi {
 
   // Future
   getFuture(): Promise<Record<string, string[]>>
+  updateFutureEntry?(monthLabel: string, oldContent: string, type: string, content: string): Promise<{ success?: boolean; error?: string }>
+  deleteFutureEntry?(monthLabel: string, content: string): Promise<{ success?: boolean; error?: string }>
 
   // Search
   search(query: string, mode?: 'text' | 'semantic'): Promise<Array<{
@@ -37,6 +44,7 @@ export interface BuJoApi {
 
   // Clear
   clearDay(date: string): Promise<{ success: boolean; error?: string }>
+  clearAllData(): Promise<{ success: boolean; removed?: number; error?: string }>
 
   // Undo
   undo(): Promise<{ description?: string; filePath?: string; filePaths?: string[]; error?: string }>
@@ -45,7 +53,9 @@ export interface BuJoApi {
   migrateEntry(fromDate: string, toDate: string, entryId: string): Promise<{ success: boolean; error?: string }>
 
   // Parsing
-  smartParse(text: string): Promise<Array<[string, string]>>
+  smartParse(text: string, logDate?: string): Promise<Array<[string, string]>>
+  originalSave(date: string, text: string): Promise<{ success: boolean; filePath?: string; error?: string }>
+  originalGet(date: string): Promise<{ exists: boolean; content: string; filePath: string; error?: string }>
 
   // Analytics
   analyticsStreak(): Promise<number>
@@ -59,17 +69,29 @@ export interface BuJoApi {
       daysTracked: number; weekdayAvg: number; weekendAvg: number;
     };
     dowRates: number[];
+    dowEntries: number[];
+    dowLoggedDays: number[];
+    journal: {
+      periodEntries: number;
+      entriesPerTrackedDay: number;
+      activeDays: number;
+      quietDays: number;
+      mix: { tasks: number; notes: number; events: number };
+      signals: { lowEnergy: number; stress: number; satisfaction: number; pride: number };
+      themes: Array<{ label: string; count: number }>;
+      openLoops: Array<{ text: string; date: string; kind: string }>;
+    };
     allTime: { rate: number; daysTracked: number; perfectDays: number };
     bestStreak: number;
     currentStreak: number;
   }>
-  analyticsHeatmap(): Promise<Record<string, { count: number; rate: number }>>
+  analyticsHeatmap(): Promise<Record<string, { count: number; rate: number; tasks: number; notes: number; events: number }>>
   migrateAnalyze(task: { text: string; count?: number; firstSeen?: string; lastSeen?: string } | string): Promise<{ analysis: string; source: 'llm' | 'fallback' }>
   coachNudgeLlm(date: string): Promise<{ nudge: string; source: 'llm' | 'rule' }>
   dailySummary(date: string): Promise<{ summary?: string; error?: string }>
   analyticsCoach(): Promise<{
     period: string; streak: number; momentum: string; completionRate: number;
-    priorityAlignment: number; totalEntries: number;
+    priorityAlignment: number; totalEntries: number; progressEntries: number; taskEntries?: number;
     stuckTasks: Array<{ text: string; count: number }>;
     killThemes: Record<string, number>;
     eventDensity: Record<string, { days: number; completionRate: number }>;
@@ -89,8 +111,8 @@ export interface BuJoApi {
   futureMarkDone(text: string): Promise<{ success: boolean; error?: string }>
 
   // Config
-  configGet(): Promise<{ has_api_key: boolean; api_key_preview: string; provider?: 'minimax' | 'openrouter'; model: string; vault_path: string; theme: string; error?: string }>
-  configSave(config: { api_key?: string; clear_api_key?: boolean; provider?: 'minimax' | 'openrouter'; model?: string; vault_path?: string; theme?: string }): Promise<{ success: boolean }>
+  configGet(): Promise<{ has_api_key: boolean; api_key_preview: string; provider?: 'minimax' | 'deepseek'; model: string; vault_path: string; theme: string; error?: string }>
+  configSave(config: { api_key?: string; clear_api_key?: boolean; provider?: 'minimax' | 'deepseek'; model?: string; vault_path?: string; theme?: string }): Promise<{ success: boolean }>
   vaultPickFolder(): Promise<{ path: string | null }>
 
   // Templates
@@ -99,6 +121,7 @@ export interface BuJoApi {
 
   // File watching
   startListening(): Promise<void>
+  bridgeDiagnostics(): { preload: string; loadedAt: string }
 
   // Global hotkey
   globalHotkey(callback: () => void): () => void

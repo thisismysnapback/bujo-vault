@@ -1,4 +1,4 @@
-export type AiProvider = 'minimax' | 'openrouter'
+export type AiProvider = 'minimax' | 'deepseek'
 
 export interface AiConfig {
   provider: AiProvider
@@ -10,28 +10,46 @@ export interface AiConfig {
 type EnvLike = Record<string, string | undefined>
 
 const MINIMAX_URL = 'https://api.minimax.io/v1/chat/completions'
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
+const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions'
 
 function normalizeProvider(value: string | undefined): AiProvider | null {
   const normalized = value?.trim().toLowerCase()
   if (normalized === 'minimax') return 'minimax'
-  if (normalized === 'openrouter') return 'openrouter'
+  if (normalized === 'deepseek') return 'deepseek'
   return null
 }
 
 function defaultModel(provider: AiProvider): string {
-  return provider === 'minimax' ? 'MiniMax-M3' : 'minimax/minimax-m2.7'
+  if (provider === 'minimax') return 'MiniMax-M3'
+  if (provider === 'deepseek') return 'deepseek-v4-pro'
 }
 
 function baseUrl(provider: AiProvider): string {
-  return provider === 'minimax' ? MINIMAX_URL : OPENROUTER_URL
+  if (provider === 'minimax') return MINIMAX_URL
+  return DEEPSEEK_URL
 }
 
 export function resolveAiConfig(env: EnvLike): AiConfig | null {
   const explicitProvider = normalizeProvider(env.BUJO_AI_PROVIDER)
 
+  if (explicitProvider) {
+    const keyByProvider: Record<AiProvider, string | undefined> = {
+      minimax: env.MINIMAX_API_KEY,
+      deepseek: env.DEEPSEEK_API_KEY,
+    }
+    const apiKey = env.BUJO_AI_KEY || keyByProvider[explicitProvider]
+    if (apiKey) {
+      return {
+        provider: explicitProvider,
+        apiKey,
+        baseUrl: baseUrl(explicitProvider),
+        model: env.BUJO_AI_MODEL || defaultModel(explicitProvider),
+      }
+    }
+  }
+
   if (env.BUJO_AI_KEY) {
-    const provider = explicitProvider || (env.MINIMAX_API_KEY ? 'minimax' : 'openrouter')
+    const provider = explicitProvider || (env.MINIMAX_API_KEY ? 'minimax' : 'deepseek')
     return {
       provider,
       apiKey: env.BUJO_AI_KEY,
@@ -50,11 +68,11 @@ export function resolveAiConfig(env: EnvLike): AiConfig | null {
     }
   }
 
-  if (env.OPENROUTER_API_KEY) {
-    const provider: AiProvider = 'openrouter'
+  if (env.DEEPSEEK_API_KEY) {
+    const provider: AiProvider = 'deepseek'
     return {
       provider,
-      apiKey: env.OPENROUTER_API_KEY,
+      apiKey: env.DEEPSEEK_API_KEY,
       baseUrl: baseUrl(provider),
       model: env.BUJO_AI_MODEL || defaultModel(provider),
     }
@@ -72,11 +90,6 @@ export function buildChatCompletionRequest(
   const headers: Record<string, string> = {
     Authorization: `Bearer ${config.apiKey}`,
     'Content-Type': 'application/json',
-  }
-
-  if (config.provider === 'openrouter') {
-    headers['HTTP-Referer'] = 'https://github.com/naungmon/bujo-ai'
-    headers['X-Title'] = 'BuJo'
   }
 
   return {

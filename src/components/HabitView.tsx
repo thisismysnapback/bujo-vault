@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { getTodayDateString } from '../lib/utils';
+import { useState, useEffect, useCallback } from 'react';
+import type { KeyboardEvent } from 'react';
 import { format, subDays } from 'date-fns';
+import { getTerminalPrompt, getTodayDateString } from '../lib/utils';
 import {
   createDailyHabit,
   hasDesktopApi,
@@ -55,9 +56,8 @@ export function HabitView() {
       const existing = prev[date] ?? [];
       if (result.completed) {
         return { ...prev, [date]: [...existing, habitId] };
-      } else {
-        return { ...prev, [date]: existing.filter(id => id !== habitId) };
       }
+      return { ...prev, [date]: existing.filter(id => id !== habitId) };
     });
     const refreshed = await refreshHabitStats(matrixStartDate, 14);
     if (!refreshed) return;
@@ -74,77 +74,60 @@ export function HabitView() {
     await load();
   }, [newName, load]);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') addHabit();
+  const handleKeyDown = (event: KeyboardEvent) => {
+    if (event.key === 'Enter') addHabit();
   };
 
   const isCompleted = (habitId: string, date: string) =>
     (completions[date] ?? []).includes(habitId);
 
   const statFor = (habitId: string): HabitStat | undefined =>
-    stats.find(s => s.habit.id === habitId);
+    stats.find(stat => stat.habit.id === habitId);
 
   if (!hasDesktopApi()) {
     return (
-      <div style={{ padding: '24px', color: 'var(--text-muted)', fontSize: '13px' }}>
+      <div className="habit-unavailable">
         // habits only available in desktop app
       </div>
     );
   }
 
   return (
-    <div style={{ padding: '24px', maxWidth: '720px', fontSize: '13px' }}>
-      {/* Header */}
-      <div style={{ marginBottom: '24px' }}>
-        <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>
-          ryan@bujo.vault $ habits
+    <div className="habit-page">
+      <div className="habit-header">
+        <div className="habit-command">
+          {getTerminalPrompt()} $ habits
         </div>
-        <div style={{ color: 'var(--text-faint)', fontSize: '11px' }}>
+        <div className="habit-subtitle">
           // daily tracking
         </div>
       </div>
 
-      {/* Section A: Today's habits */}
-      <div style={{ marginBottom: '28px' }}>
-        <div style={{ borderTop: '1px solid var(--border)', paddingTop: '12px', marginBottom: '12px', color: 'var(--text-muted)', fontSize: '11px' }}>
-          today — {today}
+      <div className="habit-section">
+        <div className="habit-section-title">
+          today - {today}
         </div>
         {habits.length === 0 && (
-          <div style={{ color: 'var(--text-faint)' }}>no habits yet. add one below.</div>
+          <div className="habit-empty">no habits yet. add one below.</div>
         )}
         {habits.map(habit => {
           const done = isCompleted(habit.id, today);
           const stat = statFor(habit.id);
           const streak = stat?.currentStreak ?? 0;
           return (
-            <div
-              key={habit.id}
-              style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}
-            >
+            <div key={habit.id} className="habit-row">
               <button
                 onClick={() => toggle(habit.id, today)}
-                style={{
-                  width: '16px',
-                  height: '16px',
-                  border: `1px solid ${done ? 'var(--green)' : 'var(--text-muted)'}`,
-                  background: done ? 'var(--green)' : 'transparent',
-                  cursor: 'pointer',
-                  flexShrink: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '10px',
-                  color: '#111',
-                }}
+                className={done ? 'habit-check habit-check-done' : 'habit-check'}
               >
                 {done ? '✓' : ''}
               </button>
-              <span style={{ color: done ? 'var(--text-muted)' : 'var(--text)', textDecoration: done ? 'line-through' : 'none' }}>
+              <span className={done ? 'habit-name habit-name-done' : 'habit-name'}>
                 {habit.emoji ? `${habit.emoji} ` : ''}{habit.name}
               </span>
               {streak > 0 && (
-                <span style={{ color: 'var(--text-faint)', fontSize: '11px', marginLeft: 'auto' }}>
-                  {streak >= 7 ? '🔥' : ''} {streak}d
+                <span className="habit-streak">
+                  {streak >= 7 ? 'hot ' : ''}{streak}d
                 </span>
               )}
             </div>
@@ -152,19 +135,21 @@ export function HabitView() {
         })}
       </div>
 
-      {/* Section B: 14-day rolling matrix */}
       {habits.length > 0 && (
-        <div style={{ marginBottom: '28px', overflowX: 'auto' }}>
-          <div style={{ borderTop: '1px solid var(--border)', paddingTop: '12px', marginBottom: '12px', color: 'var(--text-muted)', fontSize: '11px' }}>
+        <div className="habit-matrix-wrap">
+          <div className="habit-section-title">
             last 14 days
           </div>
-          <table style={{ borderCollapse: 'collapse', fontSize: '11px' }}>
+          <table className="habit-table">
             <thead>
               <tr>
-                <th style={{ textAlign: 'left', color: 'var(--text-faint)', paddingRight: '16px', fontWeight: 400, minWidth: '100px' }} />
-                {last14.map(d => (
-                  <th key={d} style={{ color: d === today ? 'var(--gold)' : 'var(--text-faint)', fontWeight: 400, width: '24px', textAlign: 'center', paddingBottom: '6px' }}>
-                    {format(new Date(d), 'd')}
+                <th className="habit-table-spacer" />
+                {last14.map(date => (
+                  <th
+                    key={date}
+                    className={date === today ? 'habit-table-day habit-table-day-today' : 'habit-table-day'}
+                  >
+                    {format(new Date(date), 'd')}
                   </th>
                 ))}
               </tr>
@@ -172,23 +157,16 @@ export function HabitView() {
             <tbody>
               {habits.map(habit => (
                 <tr key={habit.id}>
-                  <td style={{ color: 'var(--text-muted)', paddingRight: '16px', paddingBottom: '4px', whiteSpace: 'nowrap' }}>
+                  <td className="habit-table-label">
                     {habit.emoji ? `${habit.emoji} ` : ''}{habit.name}
                   </td>
-                  {last14.map(d => {
-                    const done = isCompleted(habit.id, d);
+                  {last14.map(date => {
+                    const done = isCompleted(habit.id, date);
                     return (
-                      <td key={d} style={{ textAlign: 'center', paddingBottom: '4px' }}>
+                      <td key={date} className="habit-table-cell">
                         <button
-                          onClick={() => toggle(habit.id, d)}
-                          style={{
-                            width: '14px',
-                            height: '14px',
-                            border: `1px solid ${done ? 'var(--green)' : 'var(--border)'}`,
-                            background: done ? 'var(--green)' : 'transparent',
-                            cursor: 'pointer',
-                            fontSize: '0',
-                          }}
+                          onClick={() => toggle(habit.id, date)}
+                          className={done ? 'habit-matrix-button habit-matrix-button-done' : 'habit-matrix-button'}
                         />
                       </td>
                     );
@@ -200,31 +178,19 @@ export function HabitView() {
         </div>
       )}
 
-      {/* Section C: Add habit */}
-      <div style={{ borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ color: 'var(--text-faint)' }}>{'>'}</span>
+      <div className="habit-add">
+        <div className="habit-add-row">
+          <span className="habit-prompt">{'>'}</span>
           <input
             type="text"
             value={newName}
-            onChange={e => setNewName(e.target.value)}
+            onChange={event => setNewName(event.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="add habit..."
-            style={{
-              background: 'none',
-              border: 'none',
-              outline: 'none',
-              color: 'var(--text)',
-              fontSize: '13px',
-              fontFamily: 'inherit',
-              flex: 1,
-            }}
+            className="habit-input"
           />
           {newName.trim() && (
-            <button
-              onClick={addHabit}
-              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '11px' }}
-            >
+            <button onClick={addHabit} className="habit-add-button">
               [enter]
             </button>
           )}

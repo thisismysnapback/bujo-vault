@@ -1,16 +1,39 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useVault } from '../store/VaultContext';
-import { getGreeting, getTodayDateString } from '../lib/utils';
+import { getGreeting, getTerminalPrompt, getTodayDateString } from '../lib/utils';
 import { EntryItem } from './EntryItem';
 import { InputBar } from './InputBar';
 import { format, addDays, subDays } from 'date-fns';
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon } from 'lucide-react';
 
 import { entrySortKey } from '../lib/entryModel';
-import { getCoachNudge, loadTodayHabits, summarizeDay, toggleHabitCompletion } from '../services/desktop';
+import { getCoachNudge, getOriginalInput, loadTodayHabits, summarizeDay, toggleHabitCompletion } from '../services/desktop';
+import { buildPromptInput, drawDailyPrompts, type JournalPrompt, type PromptCycleState, remainingPromptsInCycle } from '../lib/journalPrompts';
+
+const PROMPT_CYCLE_STORAGE_KEY = 'bujo:promptCycle';
+
+function loadPromptCycle(): PromptCycleState | null {
+  if (typeof window === 'undefined' || !window.localStorage) return null;
+  try {
+    const raw = window.localStorage.getItem(PROMPT_CYCLE_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && 'cycleId' in parsed && 'date' in parsed && 'usedIds' in parsed) {
+      return parsed as PromptCycleState;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+function savePromptCycle(state: PromptCycleState) {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    window.localStorage.setItem(PROMPT_CYCLE_STORAGE_KEY, JSON.stringify(state));
+  } catch { /* ignore */ }
+}
 
 export function DailyView() {
-  const { logs, updateEntry, clearDay } = useVault();
+  const { logs, updateEntry, clearDay, undo, autoCompletions, dismissAutoCompletion, pendingNavigateDate, clearPendingNavigateDate } = useVault();
   const [date, setDate] = useState(getTodayDateString());
   const [greeting, setGreeting] = useState(getGreeting());
   const [focusedIndex, setFocusedIndex] = useState(-1);
@@ -20,43 +43,79 @@ export function DailyView() {
   const [habitCompletions, setHabitCompletions] = useState<string[]>([]);
   const [summary, setSummary] = useState<string>('');
   const [isSummarizing, setIsSummarizing] = useState(false);
+  const [original, setOriginal] = useState<{ exists: boolean; content: string }>({ exists: false, content: '' });
+  const [showOriginal, setShowOriginal] = useState(false);
+  const [activePrompt, setActivePrompt] = useState<JournalPrompt | null>(null);
+  const [dailyPrompts, setDailyPrompts] = useState<JournalPrompt[]>([]);
+  const [cycleRemaining, setCycleRemaining] = useState<number>(0);
+  const [promptsExpanded, setPromptsExpanded] = useState(false);
 
   const dateRef = useRef(date);
   const focusedRef = useRef(focusedIndex);
+  const logsRef = useRef(logs);
   dateRef.current = date;
   focusedRef.current = focusedIndex;
+  logsRef.current = logs;
 
   useEffect(() => {
     const interval = setInterval(() => setGreeting(getGreeting()), 60000);
     return () => clearInterval(interval);
   }, []);
 
-  // Check for calendar navigation date
   useEffect(() => {
-    const navDate = (window as any).__bujoNavigateDate;
-    if (navDate) {
-      setDate(navDate);
-      (window as any).__bujoNavigateDate = undefined;
+    if (pendingNavigateDate) {
+      setDate(pendingNavigateDate);
+      clearPendingNavigateDate();
     }
-  });
+  }, [pendingNavigateDate, clearPendingNavigateDate]);
 
-  // Session detection: focus input on empty day, focus list on existing
+  // Pick prompts from the 31-prompt bank for whichever day is selected.
   useEffect(() => {
-    const dayLog = logs[date];
-    if (dayLog && dayLog.entries.length > 0 && focusedIndex === -1) {
-      setFocusedIndex(dayLog.entries.length - 1);
-    }
-  }, [date, logs]);
-
-  // Load coach nudge for today
-  useEffect(() => {
-    if (date !== getTodayDateString()) return;
-    const dismissed = sessionStorage.getItem(`bujo:nudge:dismissed:${date}`);
-    if (dismissed) return;
-    getCoachNudge(date).then(data => {
-      if (data.nudge) setNudge(data.nudge);
-    }).catch(() => {});
+    const prev = loadPromptCycle();
+    const result = drawDailyPrompts(prev, date);
+    const todaysIds = result.prompts.map(p => p.id);
+    const usedIds = Array.from(new Set([...(prev?.usedIds ?? []), ...todaysIds]));
+    const next: PromptCycleState = {
+      cycleId: result.cycleId,
+      date,
+      usedIds,
+      todaysIds,
+    };
+    savePromptCycle(next);
+    setDailyPrompts(result.prompts);
+    setCycleRemaining(remainingPromptsInCycle(next));
   }, [date]);
+
+  useEffect(() => {
+    setFocusedIndex(-1);
+    setPromptsExpanded(false);
+  }, [date]);
+
+  // Load coach nudge for the selected day after the browser has had time to paint and accept input.
+  useEffect(() => {
+    const dismissed = localStorage.getItem(`bujo:nudge:dismissed:${date}`);
+    setNudge('');
+    setNudgeDismissed(Boolean(dismissed));
+    if (dismissed) return;
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let idleId: number | undefined;
+    const load = () => {
+      getCoachNudge(date).then(data => {
+        if (!cancelled) setNudge(data.nudge || '');
+      }).catch(() => {});
+    };
+    if ('requestIdleCallback' in window) {
+      idleId = window.requestIdleCallback(load, { timeout: 3000 });
+    } else {
+      timeoutId = setTimeout(load, 1500);
+    }
+    return () => {
+      cancelled = true;
+      if (idleId !== undefined && 'cancelIdleCallback' in window) window.cancelIdleCallback(idleId);
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+    };
+  }, [date, logs]);
 
   // Load today's habits and persisted completions for the inline strip
   useEffect(() => {
@@ -89,9 +148,23 @@ export function DailyView() {
   };
 
   const dayLog = logs[date] || { date, entries: [] };
-  const sortedEntries = [...dayLog.entries].sort(
+  const sortedEntries = useMemo(() => [...dayLog.entries].sort(
     (a, b) => entrySortKey(a) - entrySortKey(b)
-  );
+  ), [dayLog.entries]);
+  const sortedEntriesRef = useRef(sortedEntries);
+  sortedEntriesRef.current = sortedEntries;
+
+  const handleClearDay = useCallback(async () => {
+    const hasData = sortedEntriesRef.current.length > 0 || original.exists;
+    if (!hasData) return;
+    if (!window.confirm(`Clear all entries and original input for ${date}?`)) return;
+    await clearDay(date);
+    setFocusedIndex(-1);
+    setOriginal({ exists: false, content: '' });
+    setShowOriginal(false);
+    setSummary('');
+    setNudge('');
+  }, [clearDay, date, original.exists]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     const tag = (e.target as HTMLElement).tagName;
@@ -102,21 +175,14 @@ export function DailyView() {
       setFocusedIndex((prev) => Math.max(0, prev - 1));
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
-      const log = logs[dateRef.current];
-      const sorted = log ? [...log.entries].sort(
-        (a, b) => entrySortKey(a) - entrySortKey(b)
-      ) : [];
-      const max = Math.max(0, sorted.length - 1);
+      const max = Math.max(0, sortedEntriesRef.current.length - 1);
       setFocusedIndex((prev) => Math.min(max, prev + 1));
     } else if (e.key === 'Escape') {
       setFocusedIndex(-1);
     } else if (e.key === 'x' && focusedRef.current >= 0) {
-      const log = logs[dateRef.current];
+      const log = logsRef.current[dateRef.current];
       if (log) {
-        const sorted = [...log.entries].sort(
-          (a, b) => entrySortKey(a) - entrySortKey(b)
-        );
-        const entry = sorted[focusedRef.current];
+        const entry = sortedEntriesRef.current[focusedRef.current];
         if (entry && entry.kind === 'task' && entry.status === 'active') {
           updateEntry(dateRef.current, entry.id, { type: 'done' });
         } else if (entry && entry.kind === 'task' && entry.status === 'done') {
@@ -124,33 +190,26 @@ export function DailyView() {
         }
       }
     } else if (e.key === 'k' && focusedRef.current >= 0) {
-      const log = logs[dateRef.current];
+      const log = logsRef.current[dateRef.current];
       if (log) {
-        const sorted = [...log.entries].sort(
-          (a, b) => entrySortKey(a) - entrySortKey(b)
-        );
-        const entry = sorted[focusedRef.current];
+        const entry = sortedEntriesRef.current[focusedRef.current];
         if (entry && entry.status !== 'killed') {
           updateEntry(dateRef.current, entry.id, { type: 'killed' });
         }
       }
     } else if (e.key === '>' && focusedRef.current >= 0) {
-      const log = logs[dateRef.current];
+      const log = logsRef.current[dateRef.current];
       if (log) {
-        const sorted = [...log.entries].sort(
-          (a, b) => entrySortKey(a) - entrySortKey(b)
-        );
-        const entry = sorted[focusedRef.current];
+        const entry = sortedEntriesRef.current[focusedRef.current];
         if (entry && entry.status !== 'migrated') {
           updateEntry(dateRef.current, entry.id, { type: 'migrated' });
         }
       }
     } else if (e.key === 'Delete' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
-      clearDay(dateRef.current);
-      setFocusedIndex(-1);
+      void handleClearDay();
     }
-  }, [logs, updateEntry, clearDay]);
+  }, [updateEntry, handleClearDay]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
@@ -158,6 +217,17 @@ export function DailyView() {
   }, [handleKeyDown]);
 
   const isToday = date === getTodayDateString();
+
+  useEffect(() => {
+    let cancelled = false;
+    setShowOriginal(false);
+    getOriginalInput(date).then(result => {
+      if (!cancelled) setOriginal({ exists: Boolean(result?.exists), content: result?.content || '' });
+    }).catch(() => {
+      if (!cancelled) setOriginal({ exists: false, content: '' });
+    });
+    return () => { cancelled = true; };
+  }, [date, logs]);
 
   const toggleHabit = useCallback(async (habitId: string) => {
     const result = await toggleHabitCompletion(habitId, date);
@@ -178,62 +248,82 @@ export function DailyView() {
     }
   }, [date]);
 
+  const handleToggleOriginal = useCallback(() => {
+    setShowOriginal(prev => !prev);
+  }, []);
+
+  const handleEntrySaved = useCallback(() => {
+    setPromptsExpanded(false);
+  }, []);
+
+  const hasDayData = sortedEntries.length > 0 || original.exists;
+  const promptsOpen = sortedEntries.length === 0 || promptsExpanded;
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+    <div className="view-shell">
       {/* Date nav bar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 24px', borderBottom: '1px solid var(--border)' }}>
-        <button onClick={handlePrevDay} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '2px 4px' }}>
+      <div className="daily-nav">
+        <button onClick={handlePrevDay} className="daily-nav-button">
           <ChevronLeft size={14} />
         </button>
         <button
           onClick={handleToday}
-          style={{
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            color: isToday ? 'var(--gold)' : 'var(--text-muted)',
-            fontSize: '12px',
-            fontFamily: 'inherit',
-            padding: '2px 6px',
-          }}
+          className={`daily-nav-today ${isToday ? 'daily-nav-today-active' : ''}`}
         >
           today
         </button>
-        <button onClick={handleNextDay} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '2px 4px' }}>
+        <button onClick={handleNextDay} className="daily-nav-button">
           <ChevronRight size={14} />
         </button>
-        <span style={{ fontSize: '12px', color: 'var(--text-muted)', marginLeft: '8px' }}>
+        <span className="daily-nav-date">
           {format(new Date(date + 'T12:00:00'), 'EEE, MMM d yyyy').toLowerCase()}
         </span>
       </div>
 
-      <div className="scrollbar-hide" style={{ flex: 1, overflowY: 'auto', padding: '24px', maxWidth: '640px', margin: '0 auto', width: '100%' }}>
+      <div className="view-scroll">
         {/* Terminal prompt */}
-        <div style={{ fontSize: '13px', marginBottom: '24px' }}>
-          <span style={{ color: 'var(--gold)' }}>ryan</span>
-          <span style={{ color: 'var(--text-muted)' }}>@</span>
-          <span style={{ color: 'var(--gold)' }}>bujo.vault</span>
-          <span style={{ color: 'var(--text-muted)' }}> $ </span>
-          <span style={{ color: 'var(--text)' }}>log {format(new Date(date + 'T12:00:00'), 'yyyy-MM-dd')}</span>
+        <div className="terminal-command">
+          <span className="terminal-prompt">{getTerminalPrompt()}</span>
+          <span className="terminal-muted"> $ </span>
+          <span className="terminal-command-text">log {format(new Date(date + 'T12:00:00'), 'yyyy-MM-dd')}</span>
         </div>
 
         {/* Date heading */}
-        <div style={{ marginBottom: '24px' }}>
-          <h1 style={{ fontSize: '22px', fontWeight: '600', color: 'var(--text)', margin: 0, fontFamily: 'inherit' }}>
+        <div className="daily-heading">
+          <h1 className="daily-heading-title">
             {format(new Date(date + 'T12:00:00'), 'EEEE, MMMM do').toLowerCase()}
           </h1>
-          {isToday && <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '4px 0 0' }}>// {greeting}</p>}
-          {!isToday && (
-            <button onClick={handleSummarize} disabled={isSummarizing} style={{ marginTop: '8px', background: 'transparent', border: 'none', color: 'var(--gold)', fontFamily: 'monospace', fontSize: '12px', cursor: 'pointer', padding: 0 }}>
-              [{isSummarizing ? 'summarizing...' : 'summarize'}]
-            </button>
+          {isToday && <p className="daily-greeting">// {greeting}</p>}
+          {(!isToday || original.exists || hasDayData) && (
+            <div className="daily-actions">
+              {!isToday && (
+                <button onClick={handleSummarize} disabled={isSummarizing} className="daily-action">
+                  [{isSummarizing ? 'summarizing...' : 'summarize'}]
+                </button>
+              )}
+              {original.exists && (
+                <button onClick={handleToggleOriginal} className="daily-action">
+                  [{showOriginal ? 'hide original' : 'original'}]
+                </button>
+              )}
+              {hasDayData && (
+                <button onClick={handleClearDay} className="daily-action daily-action-danger">
+                  [clear all]
+                </button>
+              )}
+            </div>
           )}
-          {summary && <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', color: 'var(--text-muted)', fontSize: '12px', marginTop: '10px', borderTop: '1px solid var(--border)', paddingTop: '8px' }}>{summary}</pre>}
+          {summary && <pre className="daily-pre">{summary}</pre>}
+          {showOriginal && original.exists && (
+            <pre className="daily-pre daily-original">
+              {original.content}
+            </pre>
+          )}
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginBottom: '32px' }}>
+        <div className="daily-entry-stack">
           {sortedEntries.length === 0 ? (
-            <div style={{ fontSize: '12px', color: 'var(--text-faint)', fontStyle: 'italic', padding: '8px 0' }}>
+            <div className="daily-empty">
               // no entries yet. start typing to capture.
             </div>
           ) : (
@@ -250,30 +340,19 @@ export function DailyView() {
         </div>
       </div>
 
-      <div style={{ padding: '16px 24px 24px', maxWidth: '640px', margin: '0 auto', width: '100%' }}>
+      <div className="daily-bottom">
         {/* Habit strip — today only */}
         {isToday && todayHabits.length > 0 && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', marginBottom: '12px', borderTop: '1px solid var(--border)', paddingTop: '10px', fontSize: '12px' }}>
+          <div className="habit-strip">
             {todayHabits.map(h => {
               const done = habitCompletions.includes(h.id);
               return (
                 <button
                   key={h.id}
                   onClick={() => toggleHabit(h.id)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    color: done ? 'var(--green)' : 'var(--text-muted)',
-                    fontFamily: 'inherit',
-                    fontSize: '12px',
-                    padding: 0,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '5px',
-                  }}
+                  className={`habit-button ${done ? 'daily-habit-done' : 'daily-habit-open'}`}
                 >
-                  <span style={{ color: done ? 'var(--green)' : 'var(--text-faint)' }}>[{done ? 'x' : ' '}]</span>
+                  <span className={done ? 'daily-habit-marker-done' : 'daily-habit-marker-open'}>[{done ? 'x' : ' '}]</span>
                   {h.emoji ? `${h.emoji} ` : ''}{h.name}
                 </button>
               );
@@ -281,18 +360,73 @@ export function DailyView() {
           </div>
         )}
 
-        {nudge && isToday && !nudgeDismissed && (
-          <div style={{ fontSize: '12px', color: 'var(--gold-dim)', padding: '8px 0', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        {nudge && !nudgeDismissed && (
+          <div className="coach-nudge">
             <span>// coach: {nudge}</span>
             <button
-              onClick={() => { setNudgeDismissed(true); sessionStorage.setItem(`bujo:nudge:dismissed:${date}`, '1'); }}
-              style={{ background: 'none', border: 'none', color: 'var(--text-faint)', cursor: 'pointer', padding: '0 0 0 8px', fontSize: '12px', lineHeight: 1 }}
+              onClick={() => { setNudgeDismissed(true); localStorage.setItem(`bujo:nudge:dismissed:${date}`, '1'); }}
+              className="dismiss-button"
             >
               ×
             </button>
           </div>
         )}
-        <InputBar date={date} />
+        {autoCompletions.length > 0 && (
+          <div className="auto-complete-notices">
+            {autoCompletions.map(item => (
+              <div key={item.key} className="auto-complete-notice">
+                <span>// auto-resolved: "{item.task}" ({item.date})</span>
+                <button
+                  onClick={async () => {
+                    await undo();
+                    dismissAutoCompletion(item.key);
+                  }}
+                  className="auto-complete-action"
+                >
+                  undo
+                </button>
+                <button
+                  onClick={() => dismissAutoCompletion(item.key)}
+                  className="dismiss-button"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        {dailyPrompts.length > 0 && (
+          <div className="prompt-section">
+            <div className="prompt-header">
+              <button
+                onClick={() => setPromptsExpanded(prev => !prev)}
+                className="prompt-toggle"
+              >
+                // {sortedEntries.length === 0 ? 'pick a prompt to start' : 'prompts for this day'}
+              </button>
+              <span className="prompt-count">// {cycleRemaining} left in cycle</span>
+            </div>
+            {promptsOpen && (
+              <div className="prompt-list">
+                {dailyPrompts.map(prompt => (
+                  <button
+                    key={prompt.id}
+                    onClick={() => setActivePrompt(prompt)}
+                    className="prompt-chip"
+                  >
+                    // {prompt.text}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        <InputBar
+          date={date}
+          prefill={activePrompt ? buildPromptInput(activePrompt) : undefined}
+          onPrefillConsumed={() => setActivePrompt(null)}
+          onEntrySaved={handleEntrySaved}
+        />
       </div>
     </div>
   );

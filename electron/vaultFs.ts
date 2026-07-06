@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'fs'
 import * as path from 'path'
 import { parseEntries, stableEntryId } from './parser'
 import type { ParsedEntry } from './parser'
@@ -20,6 +20,10 @@ export function headerForDate(date: string): string {
 
 function dailyPath(vaultPath: string, date: string): string {
   return safeJoin(vaultPath, 'daily', `${validateDate(date)}.md`)
+}
+
+function originalPath(vaultPath: string, date: string): string {
+  return safeJoin(vaultPath, 'originals', `${validateDate(date)}.md`)
 }
 
 function monthlyPath(vaultPath: string, monthKey: string): string {
@@ -63,7 +67,7 @@ export function getMonthly(vaultPath: string, monthKey: string): { date: string;
   return { date: validMonth, entries: parseEntries(content, validMonth), header, file_path: filePath }
 }
 
-export function appendEntry(vaultPath: string, date: string, type: string, content: string): { result: { success: true }; undo: UndoRecord } {
+export function appendEntry(vaultPath: string, date: string, type: string, content: string): { result: { success: true; entry: ParsedEntry }; undo: UndoRecord } {
   const validDate = validateDate(date)
   const safeContent = validateText(content, 20_000, 'content')
   const filePath = dailyPath(vaultPath, validDate)
@@ -73,7 +77,34 @@ export function appendEntry(vaultPath: string, date: string, type: string, conte
   const sym = SYMBOL_MAP[type] || 't'
   const after = before + `${sym} ${safeContent}\n`
   writeFileSync(filePath, after)
-  return { result: { success: true }, undo: { description: `added ${sym} ${safeContent}`, changes: [{ filePath, before, after }] } }
+  const entries = parseEntries(after, validDate)
+  const entry = entries[entries.length - 1]
+  return { result: { success: true, entry }, undo: { description: `added ${sym} ${safeContent}`, changes: [{ filePath, before, after }] } }
+}
+
+export function appendEntriesBatch(
+  vaultPath: string,
+  date: string,
+  entries: Array<{ type: string; content: string }>
+): { result: { success: true; entries: ParsedEntry[] }; undo: UndoRecord } {
+  const validDate = validateDate(date)
+  const safeEntries = entries.map(entry => ({
+    type: validateText(entry.type, 50, 'type'),
+    content: validateText(entry.content, 20_000, 'content'),
+  }))
+  const filePath = dailyPath(vaultPath, validDate)
+  ensureParent(filePath)
+  if (!existsSync(filePath)) writeFileSync(filePath, `# ${headerForDate(validDate)}\n\n`)
+  const before = readTextSafe(filePath)
+  const lines = safeEntries.map(entry => `${SYMBOL_MAP[entry.type] || 't'} ${entry.content}`)
+  const after = before + lines.map(line => `${line}\n`).join('')
+  writeFileSync(filePath, after)
+  const parsed = parseEntries(after, validDate)
+  const appended = parsed.slice(Math.max(0, parsed.length - safeEntries.length))
+  return {
+    result: { success: true, entries: appended },
+    undo: { description: `added ${safeEntries.length} entries`, changes: [{ filePath, before, after }] },
+  }
 }
 
 export function appendMonthlyEntry(vaultPath: string, monthKey: string, type: string, content: string): { result: { success: true }; undo: UndoRecord } {
@@ -149,11 +180,46 @@ export function deleteMonthlyEntry(vaultPath: string, monthKey: string, id: stri
 
 export function clearDay(vaultPath: string, date: string): { result: { success?: boolean; error?: string }; undo?: UndoRecord } {
   const validDate = validateDate(date)
-  const filePath = dailyPath(vaultPath, validDate)
-  if (!existsSync(filePath)) return { result: { error: 'File not found' } }
-  const before = readTextSafe(filePath)
-  unlinkSync(filePath)
-  return { result: { success: true }, undo: { description: `cleared ${validDate}`, changes: [{ filePath, before, after: null }] } }
+  const changes: UndoFileChange[] = []
+  for (const filePath of [dailyPath(vaultPath, validDate), originalPath(vaultPath, validDate)]) {
+    if (!existsSync(filePath)) continue
+    const before = readTextSafe(filePath)
+    unlinkSync(filePath)
+    changes.push({ filePath, before, after: null })
+  }
+  return {
+    result: { success: true },
+    undo: changes.length ? { description: `cleared ${validDate}`, changes } : undefined,
+  }
+}
+
+export function clearAllJournalData(vaultPath: string): { result: { success: true; removed: number }; undo?: UndoRecord } {
+  const folders = ['daily', 'originals', 'monthly', 'future', 'reflections', 'analysis', 'diagrams']
+  const changes: UndoFileChange[] = []
+
+  const visit = (dir: string) => {
+    if (!existsSync(dir)) return
+    for (const item of readdirSync(dir)) {
+      const filePath = path.join(dir, item)
+      const stat = statSync(filePath)
+      if (stat.isDirectory()) {
+        visit(filePath)
+      } else if (stat.isFile() && item.toLowerCase().endsWith('.md')) {
+        const before = readTextSafe(filePath)
+        unlinkSync(filePath)
+        changes.push({ filePath, before, after: null })
+      }
+    }
+  }
+
+  for (const folder of folders) {
+    visit(safeJoin(vaultPath, folder))
+  }
+
+  return {
+    result: { success: true, removed: changes.length },
+    undo: changes.length ? { description: 'cleared all journal data', changes } : undefined,
+  }
 }
 
 export function migrateEntry(vaultPath: string, fromDate: string, toDate: string, entryId: string): { result: { success?: boolean; error?: string }; undo?: UndoRecord } {

@@ -101,6 +101,18 @@ export async function summarizeDay(date: string): Promise<{ summary?: string; er
   return api.dailySummary(date);
 }
 
+export async function saveOriginalInput(date: string, text: string): Promise<{ success?: boolean; error?: string } | null> {
+  const api = getDesktopApi();
+  if (!api) return null;
+  return api.originalSave(date, text);
+}
+
+export async function getOriginalInput(date: string): Promise<{ exists: boolean; content: string; filePath: string; error?: string } | null> {
+  const api = getDesktopApi();
+  if (!api) return null;
+  return api.originalGet(date);
+}
+
 export async function analyzeMigrationTask(task: MigrationAnalysisInput | string): Promise<{ analysis: string; source: 'llm' | 'fallback' }> {
   const api = getDesktopApi();
   if (!api) return { analysis: '// ai unavailable', source: 'fallback' };
@@ -113,7 +125,7 @@ export async function getCoachNudge(date: string): Promise<{ nudge: string; sour
 
   try {
     const data = await api.coachNudgeLlm(date);
-    if (data.nudge) return data;
+    return data;
   } catch {
     // Fall through to deterministic analytics coach below.
   }
@@ -191,4 +203,11 @@ export async function clearDays(dates: string[]): Promise<boolean> {
   if (!api) return false;
   await Promise.all(dates.map(date => api.clearDay(date)));
   return true;
+}
+
+export async function clearAllData(): Promise<boolean> {
+  const api = getDesktopApi();
+  if (!api?.clearAllData) return false;
+  const result = await api.clearAllData();
+  return Boolean(result.success);
 }

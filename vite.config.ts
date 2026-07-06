@@ -32,6 +32,10 @@ export default defineConfig({
             outDir: 'dist-electron',
             rollupOptions: {
               external: ['chokidar'],
+              output: {
+                entryFileNames: 'preload.cjs',
+                format: 'cjs',
+              },
             },
           },
         },

@@ -184,7 +184,7 @@ describe('noteHeavyDays', () => {
 })
 
 describe('eventHeavyDayNudge', () => {
-  it('detects event-heavy days with zero tasks done', () => {
+  it('detects event-heavy days with no clear progress', () => {
     const logs = [
       makeLog('2026-04-01', [
         { type: 'event', content: 'meeting 1' },
@@ -194,7 +194,19 @@ describe('eventHeavyDayNudge', () => {
       ]),
     ]
     const nudge = eventHeavyDayNudge(logs)
-    expect(nudge).toContain('overcommit alert')
+    expect(nudge).toContain('possible overcommit')
+  })
+
+  it('counts completed events as progress before warning about overcommit', () => {
+    const logs = [
+      makeLog('2026-04-01', [
+        { type: 'event', content: 'Called mom about passport' },
+        { type: 'event', content: 'Spent the day modeling Sora face' },
+        { type: 'event', content: 'Delivered Mr Suit podcast' },
+        { type: 'task', content: 'pending task' },
+      ]),
+    ]
+    expect(eventHeavyDayNudge(logs)).toBeNull()
   })
 
   it('returns null when no event-heavy days', () => {
@@ -204,6 +216,22 @@ describe('eventHeavyDayNudge', () => {
 })
 
 describe('coachingNudge', () => {
+  it('does not invent a coaching pattern before any logs exist', () => {
+    const logs7 = Array.from({ length: 7 }, (_, i) =>
+      makeLog(`2026-04-${String(7 - i).padStart(2, '0')}`, [])
+    )
+    expect(coachingNudge(logs7, [], 0)).toContain('No logs yet')
+  })
+
+  it('does not judge note-only logs as unfinished priorities', () => {
+    const logs7 = [
+      makeLog('2026-04-07', [{ type: 'note', content: 'Long reflective journal note about setup friction' }]),
+    ]
+    const nudge = coachingNudge(logs7, logs7, 1)
+    expect(nudge).not.toContain('setting priorities')
+    expect(nudge).toContain('No task patterns yet')
+  })
+
   it('suggests killing stuck tasks', () => {
     const allLogs = Array.from({ length: 5 }, (_, i) =>
       makeLog(`2026-04-${String(i + 1).padStart(2, '0')}`, [
@@ -244,8 +272,8 @@ describe('computeHeatmap', () => {
       ]),
     ]
     const heatmap = computeHeatmap(logs)
-    expect(heatmap['2026-04-01']).toEqual({ count: 3, rate: 2 / 3 })
-    expect(heatmap['2026-04-02']).toEqual({ count: 1, rate: 0 })
+    expect(heatmap['2026-04-01']).toEqual({ count: 3, rate: 2 / 3, tasks: 3, notes: 0, events: 0 })
+    expect(heatmap['2026-04-02']).toEqual({ count: 1, rate: 0, tasks: 1, notes: 0, events: 0 })
   })
 
   it('skips empty days', () => {
@@ -259,6 +287,6 @@ describe('computeHeatmap', () => {
       { type: 'event', content: 'an event' },
     ])]
     const heatmap = computeHeatmap(logs)
-    expect(heatmap['2026-04-01']).toEqual({ count: 2, rate: 0 })
+    expect(heatmap['2026-04-01']).toEqual({ count: 2, rate: 0, tasks: 0, notes: 1, events: 1 })
   })
 })
